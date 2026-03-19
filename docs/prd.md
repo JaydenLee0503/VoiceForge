@@ -13,14 +13,32 @@ Web application with a premium, futuristic design aesthetic
 
 ## 2. Visual Design System
 
-### 2.1 Color Palette
-- Base: Deep charcoal or deep navy
-- Accents: Subtle electric blue or violet
-- Minimal glow effects used only where they add meaning
-- Strong contrast between primary and secondary content
+### 2.1 Theme Modes
+- Dark Mode (default):
+  - Base: Deep charcoal or deep navy
+  - Accents: Subtle electric blue or violet
+  - Minimal glow effects used only where they add meaning
+  - Strong contrast between primary and secondary content
+- Light Mode:
+  - Base: Clean white or light gray
+  - Accents: Refined blue or violet tones
+  - Maintains premium aesthetic with appropriate contrast
+  - Consistent visual language with dark mode
+- Theme toggle button positioned at the bottom of navigation, below Sign out button
 
-### 2.2 Design Principles
-- Dark theme as foundation
+### 2.2 Color Palette
+- Dark Mode:
+  - Base: Deep charcoal or deep navy
+  - Accents: Subtle electric blue or violet
+  - Minimal glow effects used only where they add meaning
+  - Strong contrast between primary and secondary content
+- Light Mode:
+  - Base: Clean white or light gray
+  - Accents: Refined blue or violet tones
+  - Maintains premium aesthetic with appropriate contrast
+
+### 2.3 Design Principles
+- Support for both dark and light themes
 - Clean, spacious layout with thoughtful, deliberate spacing
 - Larger typography hierarchy
 - Elegant panels with soft borders
@@ -32,16 +50,18 @@ Web application with a premium, futuristic design aesthetic
 - Futuristic mission control inspiration
 - Expressive through motion and audio-inspired shapes, not visual chaos
 
-### 2.3 Typography
+### 2.4 Typography
 - Strong hierarchy with larger primary text
 - Clean, modern, professional fonts
 - Improved readability through better contrast and spacing
+- Consistent across both theme modes
 
-### 2.4 Component Styling
+### 2.5 Component Styling
 - Elegant panels with soft borders
 - Refined card designs
 - Premium, polished visual treatment
 - Consistent visual language across all components
+- Adaptive styling for both dark and light modes
 
 ## 3. Core Features
 
@@ -185,11 +205,20 @@ Web application with a premium, futuristic design aesthetic
 - Better readability
 - Premium detail drawer or modal for reviewing individual sessions
 
+### 3.8 Navigation and Theme Controls
+- Navigation sidebar or top navigation for logged-in pages
+- Sign out button
+- Theme mode toggle button positioned at the bottom of navigation, below Sign out button
+- Theme toggle switches between dark mode and light mode
+- Theme preference persists across sessions
+
 ## 4. Reusable UI Components
 
 ### 4.1 Navigation Components
 - Navbar with premium styling
 - Sidebar or top navigation for logged-in pages
+- Theme mode toggle button (positioned below Sign out button)
+- Sign out button
 
 ### 4.2 Content Components
 - Scenario cards (immersive and polished)
@@ -205,6 +234,11 @@ Web application with a premium, futuristic design aesthetic
 - Progress indicator
 - AI coach status card (premium design)
 
+### 4.3 Theme-Adaptive Components
+- All components must support both dark and light mode
+- Consistent visual language across theme modes
+- Smooth transitions between theme changes
+
 ## 5. Design Tone and Feel
 
 ### 5.1 Overall Aesthetic
@@ -214,6 +248,7 @@ Web application with a premium, futuristic design aesthetic
 - Slightly gamified, but not game-like
 - Modern and high-end, not generic SaaS
 - Closer to a premium AI communication product than a general productivity dashboard
+- Consistent premium feel across both dark and light modes
 
 ### 5.2 Tone and Copy Direction
 - Calm
@@ -247,3 +282,5 @@ Web application with a premium, futuristic design aesthetic
 - Investor-demo quality polish
 - Strong typography, visual calm, clean spacing
 - High-end real-time voice interface aesthetic
+- Theme mode switching functionality
+- Theme preference persistence

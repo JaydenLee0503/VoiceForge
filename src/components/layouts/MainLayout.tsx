@@ -9,11 +9,14 @@ import {
   ChevronRight,
   Menu,
   X,
-  PlusCircle
+  PlusCircle,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { useTheme } from '@/contexts/ThemeContext';
 
 interface SidebarProps {
   className?: string;
@@ -29,6 +32,7 @@ const navItems = [
 export function Sidebar({ className }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
+  const { theme, toggleTheme } = useTheme();
 
   return (
     <div className={cn("pb-12 h-full flex flex-col", className)}>
@@ -61,17 +65,32 @@ export function Sidebar({ className }: SidebarProps) {
           </div>
         </div>
       </div>
-      <div className="mt-auto px-3 py-2">
-        <div className="space-y-1">
-          <Button 
-            variant="ghost" 
-            className="w-full justify-start gap-3 h-11 text-sm font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10" 
-            onClick={() => navigate('/')}
-          >
-            <LogOut className="h-4 w-4" />
-            Sign Out
-          </Button>
-        </div>
+      <div className="mt-auto px-3 py-2 space-y-1">
+        <Button 
+          variant="ghost" 
+          className="w-full justify-start gap-3 h-11 text-sm font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10" 
+          onClick={() => navigate('/')}
+        >
+          <LogOut className="h-4 w-4" />
+          Sign Out
+        </Button>
+        <Button 
+          variant="ghost" 
+          className="w-full justify-start gap-3 h-11 text-sm font-medium text-muted-foreground hover:bg-secondary/50" 
+          onClick={toggleTheme}
+        >
+          {theme === 'dark' ? (
+            <>
+              <Sun className="h-4 w-4" />
+              Light Mode
+            </>
+          ) : (
+            <>
+              <Moon className="h-4 w-4" />
+              Dark Mode
+            </>
+          )}
+        </Button>
       </div>
     </div>
   );
