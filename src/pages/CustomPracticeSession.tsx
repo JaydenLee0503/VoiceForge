@@ -147,16 +147,16 @@ export default function CustomPracticeSession() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-8">
-            <Card className="bg-card/30 border-white/5 py-8">
-              <CardTitle className="text-3xl font-bold text-primary mb-2">{config.questionsCount}</CardTitle>
+            <Card className="bg-card border-border py-8">
+              <CardTitle className="text-4xl font-bold text-primary mb-2">{config.questionsCount}</CardTitle>
               <CardDescription className="text-xs uppercase font-bold tracking-widest">Questions Handled</CardDescription>
             </Card>
-            <Card className="bg-card/30 border-white/5 py-8">
-              <CardTitle className="text-3xl font-bold text-cyan-500">{formatTime(config.prepTime * config.questionsCount)}</CardTitle>
+            <Card className="bg-card border-border py-8">
+              <CardTitle className="text-4xl font-bold text-cyan-500">{formatTime(config.prepTime * config.questionsCount)}</CardTitle>
               <CardDescription className="text-xs uppercase font-bold tracking-widest">Preparation Time</CardDescription>
             </Card>
-            <Card className="bg-card/30 border-white/5 py-8">
-              <CardTitle className="text-3xl font-bold text-green-500">{formatTime(config.answerTime * config.questionsCount)}</CardTitle>
+            <Card className="bg-card border-border py-8">
+              <CardTitle className="text-4xl font-bold text-green-500">{formatTime(config.answerTime * config.questionsCount)}</CardTitle>
               <CardDescription className="text-xs uppercase font-bold tracking-widest">Response Time</CardDescription>
             </Card>
           </div>
@@ -165,7 +165,7 @@ export default function CustomPracticeSession() {
              <Button 
                 size="lg" 
                 variant="outline" 
-                className="rounded-full px-8 gap-2 border-white/10 hover:bg-white/5 h-14"
+                className="rounded-full px-8 gap-2 border-border hover:bg-secondary h-14"
                 onClick={() => navigate('/custom-practice')}
               >
                 <RotateCcw className="h-5 w-5" />
@@ -194,7 +194,7 @@ export default function CustomPracticeSession() {
               <span>Overall Progress</span>
               <span>Question {currentQuestionIndex + 1} of {config.questionsCount}</span>
            </div>
-           <Progress value={progress} className="h-1.5 bg-white/5" />
+           <Progress value={progress} className="h-1.5 bg-secondary" />
         </div>
 
         {/* Main Content Area */}
@@ -208,7 +208,7 @@ export default function CustomPracticeSession() {
             className="w-full flex flex-col gap-8"
           >
             {/* Question Card */}
-            <Card className="bg-card/30 border-white/10 backdrop-blur-2xl p-8 md:p-12 relative overflow-hidden group">
+            <Card className="bg-card border-border backdrop-blur-2xl p-8 md:p-12 relative overflow-hidden group">
                <div className="absolute top-0 right-0 p-8 opacity-5">
                   <MessageSquare className="h-32 w-32" />
                </div>
@@ -226,9 +226,9 @@ export default function CustomPracticeSession() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-stretch">
                <Card className={cn(
                   "border-2 transition-all duration-500 overflow-hidden",
-                  status === 'preparing' ? "border-cyan-500/50 bg-cyan-500/5 shadow-[0_0_30px_rgba(6,182,212,0.1)]" : "border-white/5 opacity-40 grayscale"
+                  status === 'preparing' ? "border-cyan-500/50 bg-cyan-500/5 shadow-[0_0_30px_rgba(6,182,212,0.1)]" : "border-border opacity-40 grayscale"
                )}>
-                  <CardHeader className="pb-4 border-b border-white/5">
+                  <CardHeader className="pb-4 border-b border-border">
                      <div className="flex items-center gap-2">
                         <Timer className="h-4 w-4 text-cyan-500" />
                         <CardTitle className="text-sm font-bold uppercase tracking-widest">Preparation Phase</CardTitle>
@@ -238,7 +238,7 @@ export default function CustomPracticeSession() {
                      <div className="text-6xl font-black font-mono text-cyan-500 drop-shadow-[0_0_10px_rgba(6,182,212,0.3)]">
                         {status === 'preparing' ? formatTime(timeLeft) : '---'}
                      </div>
-                     <Progress value={status === 'preparing' ? (timeLeft / config.prepTime) * 100 : 0} className="h-1 bg-white/5" />
+                     <Progress value={status === 'preparing' ? (timeLeft / config.prepTime) * 100 : 0} className="h-1 bg-secondary" />
                      {status === 'preparing' && (
                         <Button 
                           variant="outline" 
@@ -253,9 +253,9 @@ export default function CustomPracticeSession() {
 
                <Card className={cn(
                   "border-2 transition-all duration-500 overflow-hidden",
-                  status === 'answering' ? "border-green-500/50 bg-green-500/5 shadow-[0_0_30px_rgba(34,197,94,0.1)]" : "border-white/5 opacity-40 grayscale"
+                  status === 'answering' ? "border-green-500/50 bg-green-500/5 shadow-[0_0_30px_rgba(34,197,94,0.1)]" : "border-border opacity-40 grayscale"
                )}>
-                  <CardHeader className="pb-4 border-b border-white/5">
+                  <CardHeader className="pb-4 border-b border-border">
                      <div className="flex items-center gap-2">
                         <Clock className="h-4 w-4 text-green-500" />
                         <CardTitle className="text-sm font-bold uppercase tracking-widest">Response Phase</CardTitle>
@@ -265,7 +265,7 @@ export default function CustomPracticeSession() {
                      <div className="text-6xl font-black font-mono text-green-500 drop-shadow-[0_0_10px_rgba(34,197,94,0.3)]">
                         {status === 'answering' ? formatTime(timeLeft) : '---'}
                      </div>
-                     <Progress value={status === 'answering' ? (timeLeft / config.answerTime) * 100 : 0} className="h-1 bg-white/5" />
+                     <Progress value={status === 'answering' ? (timeLeft / config.answerTime) * 100 : 0} className="h-1 bg-secondary" />
                      {status === 'answering' && (
                         <Button 
                           className="w-full rounded-full bg-green-600 hover:bg-green-500 text-white font-bold gap-2 h-11"

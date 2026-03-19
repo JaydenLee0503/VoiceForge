@@ -48,7 +48,7 @@ export default function CustomPracticeConfig() {
             <PlusCircle className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight mb-1">Custom Practice</h1>
+            <h1 className="text-4xl font-bold tracking-tight mb-1">Custom Practice</h1>
             <p className="text-muted-foreground">Configure your own tailored speaking rehearsal session.</p>
           </div>
         </div>
@@ -58,8 +58,8 @@ export default function CustomPracticeConfig() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
         >
-          <Card className="bg-card/30 border-white/5 backdrop-blur-xl overflow-hidden">
-            <CardHeader className="border-b border-white/5 pb-6">
+          <Card className="bg-card border-border backdrop-blur-xl overflow-hidden">
+            <CardHeader className="border-b border-border pb-6">
               <div className="flex items-center gap-2 text-primary mb-1">
                 <Settings2 className="h-4 w-4" />
                 <span className="text-xs font-bold uppercase tracking-widest">Session Configuration</span>
@@ -130,7 +130,7 @@ export default function CustomPracticeConfig() {
                 <p className="text-xs text-muted-foreground">The formal countdown for your recorded or performed answer.</p>
               </div>
             </CardContent>
-            <CardFooter className="bg-white/5 border-t border-white/5 p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <CardFooter className="bg-secondary border-t border-border p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-6 text-sm">
                 <div className="flex flex-col">
                   <span className="text-muted-foreground uppercase text-[10px] font-bold tracking-wider">Estimated Total</span>

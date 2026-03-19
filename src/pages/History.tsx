@@ -61,7 +61,7 @@ export default function History() {
               <HistoryIcon className="h-6 w-6" />
             </div>
             <div>
-              <h1 className="text-3xl font-bold tracking-tight mb-1">Session History</h1>
+              <h1 className="text-4xl font-bold tracking-tight mb-1">Session History</h1>
               <p className="text-muted-foreground">Review your past performances and tracking your growth.</p>
             </div>
           </div>
@@ -70,12 +70,12 @@ export default function History() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
               <Input 
                 placeholder="Search history..." 
-                className="pl-10 bg-card/50 border-white/5 focus-visible:ring-primary h-11"
+                className="pl-10 bg-card border-border focus-visible:ring-primary h-11"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <Button variant="outline" className="gap-2 h-11 border-white/10 hover:bg-white/5" onClick={() => {}}>
+            <Button variant="outline" className="gap-2 h-11 border-border hover:bg-secondary" onClick={() => {}}>
               <Filter className="h-4 w-4" />
               Filters
             </Button>
@@ -83,10 +83,10 @@ export default function History() {
         </div>
 
         {/* Desktop Table View */}
-        <div className="hidden lg:block border rounded-2xl bg-card/30 border-white/5 overflow-hidden">
+        <div className="hidden lg:block border rounded-2xl bg-card border-border overflow-hidden">
           <Table>
-            <TableHeader className="bg-white/5">
-              <TableRow className="border-white/5 hover:bg-transparent">
+            <TableHeader className="bg-secondary">
+              <TableRow className="border-border hover:bg-transparent">
                 <TableHead className="py-5 font-bold uppercase tracking-wider text-[10px] text-muted-foreground px-6">Scenario</TableHead>
                 <TableHead className="py-5 font-bold uppercase tracking-wider text-[10px] text-muted-foreground">Date</TableHead>
                 <TableHead className="py-5 font-bold uppercase tracking-wider text-[10px] text-muted-foreground">Confidence</TableHead>
@@ -98,7 +98,7 @@ export default function History() {
             </TableHeader>
             <TableBody>
               {filteredHistory.map((session) => (
-                <TableRow key={session.id} className="border-white/5 hover:bg-white/5 transition-colors group">
+                <TableRow key={session.id} className="border-border hover:bg-secondary transition-colors group">
                   <TableCell className="py-5 font-bold px-6 group-hover:text-primary transition-colors">
                     {session.scenario}
                   </TableCell>
@@ -138,7 +138,7 @@ export default function History() {
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-48 bg-popover border-white/10">
+                      <DropdownMenuContent align="end" className="w-48 bg-popover border-border">
                         <DropdownMenuItem className="gap-2 cursor-pointer">
                           <BarChart className="h-4 w-4" /> View Details
                         </DropdownMenuItem>
@@ -160,7 +160,7 @@ export default function History() {
         {/* Mobile/Card List View */}
         <div className="lg:hidden space-y-4">
           {filteredHistory.map((session) => (
-            <Card key={session.id} className="bg-card/50 border-white/5 hover:border-primary/20 transition-all">
+            <Card key={session.id} className="bg-card border-border hover:border-primary/20 transition-all">
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between mb-2">
                   <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20 text-[10px] font-bold uppercase tracking-widest">
@@ -180,13 +180,13 @@ export default function History() {
                     </div>
                   </div>
                   <Link to="/results">
-                    <Button variant="ghost" size="icon" className="rounded-full bg-white/5 h-10 w-10" onClick={() => {}}>
+                    <Button variant="ghost" size="icon" className="rounded-full bg-secondary h-10 w-10" onClick={() => {}}>
                       <ChevronRight className="h-5 w-5" />
                     </Button>
                   </Link>
                 </div>
               </CardHeader>
-              <CardContent className="pt-0 pb-4 border-t border-white/5 mt-2 flex items-center justify-between">
+              <CardContent className="pt-0 pb-4 border-t border-border mt-2 flex items-center justify-between">
                 <div className="flex items-center gap-2 pt-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                   <Clock className="h-3 w-3" />
                   {session.duration}

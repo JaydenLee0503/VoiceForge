@@ -80,7 +80,7 @@ export default function Results() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: idx * 0.1 }}
             >
-              <Card className="bg-card/50 border-white/5 hover:border-primary/20 transition-all overflow-hidden relative group">
+              <Card className="bg-card border-border hover:border-primary/20 transition-all overflow-hidden relative group">
                 <div className={cn("absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform", score.color)}>
                   <score.icon className="h-12 w-12" />
                 </div>
@@ -89,10 +89,10 @@ export default function Results() {
                     <score.icon className={cn("h-4 w-4", score.color)} />
                   </div>
                   <CardDescription className="text-xs font-bold uppercase tracking-wider">{score.label}</CardDescription>
-                  <CardTitle className="text-3xl font-bold">{score.value}%</CardTitle>
+                  <CardTitle className="text-4xl font-bold">{score.value}%</CardTitle>
               </CardHeader>
               <CardContent>
-                <Progress value={score.value} className="h-1 bg-white/5" />
+                <Progress value={score.value} className="h-1 bg-secondary" />
               </CardContent>
             </Card>
           </motion.div>
@@ -102,7 +102,7 @@ export default function Results() {
       {/* Insights Section */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         {insights.map((insight, idx) => (
-          <Card key={idx} className="bg-card/50 border-white/5 flex flex-col h-full">
+          <Card key={idx} className="bg-card border-border flex flex-col h-full">
             <CardHeader>
               <div className={cn("h-10 w-10 rounded-xl flex items-center justify-center mb-4", insight.bg)}>
                 <insight.icon className={cn("h-5 w-5", insight.color)} />
@@ -119,7 +119,7 @@ export default function Results() {
       </div>
 
       {/* Transcript Summary Placeholder */}
-      <Card className="bg-card/30 border-white/5">
+      <Card className="bg-card border-border">
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-xl">Transcript Summary</CardTitle>
@@ -131,7 +131,7 @@ export default function Results() {
           </Button>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-3">
+          <div className="p-4 rounded-xl bg-secondary border border-border space-y-3">
             <div className="flex items-center gap-2 text-xs font-bold uppercase text-primary">
               <Clock className="h-3 w-3" />
               0:45 - High Engagement
@@ -140,7 +140,7 @@ export default function Results() {
               "...The unique value proposition is our proprietary AI that analyzes voice patterns in real-time..."
             </p>
           </div>
-          <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-3">
+          <div className="p-4 rounded-xl bg-secondary border border-border space-y-3">
             <div className="flex items-center gap-2 text-xs font-bold uppercase text-destructive">
               <AlertCircle className="h-3 w-3" />
               1:20 - Filler Word Detected
@@ -155,7 +155,7 @@ export default function Results() {
       {/* Action Buttons */}
       <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-8">
         <Link to="/session/pitch-coach">
-          <Button size="lg" variant="outline" className="rounded-full px-8 gap-2 border-white/10 hover:bg-white/5" onClick={() => {}}>
+          <Button size="lg" variant="outline" className="rounded-full px-8 gap-2 border-border hover:bg-secondary" onClick={() => {}}>
             <RotateCcw className="h-5 w-5" />
             Retry Session
           </Button>
