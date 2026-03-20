@@ -1,29 +1,63 @@
 import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { historySummary, recentSessions } from "@/shared/data/mock";
 import { AppShell } from "@/shared/layout/app-shell";
 import { PageIntro } from "@/shared/layout/page-intro";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Panel } from "@/shared/ui/panel";
 
+import {
+  formatSessionDuration,
+  loadSessionHistory,
+  toSessionHistoryListItem,
+} from "../session/session-storage";
+
+function getAverage(values: number[]) {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  return Math.round(values.reduce((total, value) => total + value, 0) / values.length);
+}
+
 export function SessionHistoryPage() {
   const [query, setQuery] = useState("");
-
+  const sessionHistory = useMemo(() => loadSessionHistory(), []);
+  const historyItems = useMemo(
+    () => sessionHistory.map((entry) => toSessionHistoryListItem(entry)),
+    [sessionHistory],
+  );
+  const summaryCards = useMemo(
+    () => [
+      { label: "Completed", value: String(historyItems.length) },
+      {
+        label: "Avg. Confidence",
+        value: `${getAverage(historyItems.map((item) => item.confidence))}%`,
+      },
+      {
+        label: "Avg. Duration",
+        value: formatSessionDuration(
+          getAverage(sessionHistory.map((entry) => entry.payload.durationSeconds)),
+        ),
+      },
+    ],
+    [historyItems, sessionHistory],
+  );
   const filteredSessions = useMemo(
     () =>
-      recentSessions.filter((session) =>
+      historyItems.filter((session) =>
         session.scenario.toLowerCase().includes(query.toLowerCase()),
       ),
-    [query],
+    [historyItems, query],
   );
+  const hasHistory = historyItems.length > 0;
 
   return (
     <AppShell>
       <div className="mx-auto max-w-7xl space-y-8">
         <PageIntro
-          description="Review past sessions, spot patterns, and decide what the next repetition should train."
+          description="Review completed sessions, spot patterns, and decide what the next repetition should train."
           eyebrow="Session History"
           title="Performance log"
           actions={
@@ -40,7 +74,7 @@ export function SessionHistoryPage() {
         />
 
         <div className="grid gap-4 md:grid-cols-3">
-          {historySummary.map((item) => (
+          {summaryCards.map((item) => (
             <Panel key={item.label} className="p-5" elevated>
               <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
                 {item.label}
@@ -78,7 +112,11 @@ export function SessionHistoryPage() {
                 <span className="text-sm text-muted-foreground">{session.duration}</span>
                 <span className="text-sm">{session.confidence}%</span>
                 <span className="text-sm">{session.clarity}%</span>
-                <Button className="w-full lg:w-auto" to={`/results?session=${session.id}`} variant="secondary">
+                <Button
+                  className="w-full lg:w-auto"
+                  to={`/results?session=${session.id}`}
+                  variant="secondary"
+                >
                   View
                 </Button>
               </div>
@@ -86,7 +124,19 @@ export function SessionHistoryPage() {
           </div>
         </Panel>
 
-        {filteredSessions.length === 0 && (
+        {!hasHistory && (
+          <Panel className="p-10 text-center" elevated>
+            <p className="text-xl font-semibold">No completed sessions yet.</p>
+            <p className="mt-3 text-sm text-muted-foreground">
+              Finish a live speaking session and it will appear here automatically.
+            </p>
+            <div className="mt-6">
+              <Button to="/scenarios">Start a session</Button>
+            </div>
+          </Panel>
+        )}
+
+        {hasHistory && filteredSessions.length === 0 && (
           <Panel className="p-10 text-center" elevated>
             <p className="text-xl font-semibold">No sessions match this search.</p>
             <p className="mt-3 text-sm text-muted-foreground">

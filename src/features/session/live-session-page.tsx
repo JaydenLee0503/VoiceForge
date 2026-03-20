@@ -1,4 +1,5 @@
 import {
+  Activity,
   Camera,
   CameraOff,
   ChevronLeft,
@@ -9,17 +10,28 @@ import {
   Play,
   Radio,
   Sparkles,
+  Target,
   TriangleAlert,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import { liveMetrics, performanceSignals, scenarios } from "@/shared/data/mock";
+import { buildDeterministicLiveMetricsSummary } from "../../../lib/voice-feedback/analysis";
+import type {
+  LiveMetricsSummary,
+  SessionAnalysisPayload,
+} from "../../../lib/voice-feedback/contracts";
+import { scenarios } from "@/shared/data/mock";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Panel } from "@/shared/ui/panel";
 import { ProgressBar } from "@/shared/ui/progress-bar";
 
+import { requestLiveMetrics } from "./feedback-client";
+import {
+  createSessionSnapshot,
+  saveLastSessionSnapshot,
+} from "./session-storage";
 import { useLiveSession } from "./use-live-session";
 
 type LivePageStatus =
@@ -73,6 +85,53 @@ function getCoachStatusLine(
     : "Listening and analyzing in real time";
 }
 
+function buildSessionPayload(
+  scenario: (typeof scenarios)[number],
+  transcript: SessionAnalysisPayload["transcript"],
+  durationSeconds: number,
+): SessionAnalysisPayload {
+  return {
+    durationSeconds,
+    scenario: {
+      description: scenario.description,
+      focus: scenario.focus,
+      id: scenario.id,
+      title: scenario.title,
+    },
+    transcript,
+  };
+}
+
+function mergeLiveMetrics(
+  base: LiveMetricsSummary,
+  overlay: LiveMetricsSummary,
+): LiveMetricsSummary {
+  return {
+    ...base,
+    coachCue: overlay.coachCue,
+    metrics: base.metrics.map((metric) => {
+      const overlayMetric = overlay.metrics.find(
+        (candidate) => candidate.label === metric.label,
+      );
+
+      return overlayMetric
+        ? {
+            ...metric,
+            status: overlayMetric.status,
+          }
+        : metric;
+    }),
+    model: overlay.model,
+    signals: overlay.signals,
+    source: overlay.source,
+    updatedAt: overlay.updatedAt,
+  };
+}
+
+function getSignalIcon(label: string) {
+  return label === "Primary aim" ? Target : Activity;
+}
+
 export function LiveSessionPage() {
   const navigate = useNavigate();
   const { scenarioId } = useParams<{ scenarioId: string }>();
@@ -84,6 +143,7 @@ export function LiveSessionPage() {
   const [cameraEnabled, setCameraEnabled] = useState(true);
   const [seconds, setSeconds] = useState(0);
   const transcriptAnchor = useRef<HTMLDivElement | null>(null);
+  const secondsRef = useRef(0);
   const {
     disconnectMessage,
     endSession,
@@ -98,6 +158,17 @@ export function LiveSessionPage() {
     toggleMuted,
     transcript,
   } = useLiveSession();
+  const sessionPayload = useMemo(
+    () => buildSessionPayload(scenario, transcript, seconds),
+    [scenario, transcript, seconds],
+  );
+  const deterministicLiveMetrics = useMemo(
+    () => buildDeterministicLiveMetricsSummary(sessionPayload),
+    [sessionPayload],
+  );
+  const [liveMetricsSummary, setLiveMetricsSummary] = useState(() =>
+    buildDeterministicLiveMetricsSummary(buildSessionPayload(scenario, [], 0)),
+  );
 
   const isConnected = sessionStatus === "connected";
   const isConnecting = sessionStatus === "connecting";
@@ -108,6 +179,10 @@ export function LiveSessionPage() {
     (sessionStatus === "disconnected" && transcript.length > 0
       ? disconnectMessage
       : null);
+
+  useEffect(() => {
+    secondsRef.current = seconds;
+  }, [seconds]);
 
   useEffect(() => {
     if (!isConnected) {
@@ -125,6 +200,42 @@ export function LiveSessionPage() {
     transcriptAnchor.current?.scrollIntoView({ behavior: "smooth" });
   }, [transcript]);
 
+  useEffect(() => {
+    setLiveMetricsSummary((current) => mergeLiveMetrics(deterministicLiveMetrics, current));
+  }, [deterministicLiveMetrics]);
+
+  useEffect(() => {
+    if (!isConnected || !transcript.some((entry) => entry.role === "user")) {
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const requestPayload = buildSessionPayload(
+      scenario,
+      transcript,
+      secondsRef.current,
+    );
+
+    void requestLiveMetrics(requestPayload, controller.signal).then((summary) => {
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      setLiveMetricsSummary((current) =>
+        mergeLiveMetrics(
+          buildDeterministicLiveMetricsSummary(requestPayload),
+          summary.updatedAt >= current.updatedAt ? summary : current,
+        ),
+      );
+    });
+
+    return () => controller.abort();
+  }, [isConnected, scenario, transcript]);
+
+  const renderedLiveMetrics = useMemo(
+    () => mergeLiveMetrics(deterministicLiveMetrics, liveMetricsSummary),
+    [deterministicLiveMetrics, liveMetricsSummary],
+  );
   const timerLabel = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(
     seconds % 60,
   ).padStart(2, "0")}`;
@@ -306,13 +417,11 @@ export function LiveSessionPage() {
                 <span className="text-sm text-muted-foreground">Live feedback</span>
               </div>
               <div className="mt-6 space-y-5">
-                {liveMetrics.map((metric) => (
+                {renderedLiveMetrics.metrics.map((metric) => (
                   <div key={metric.label} className="space-y-3">
                     <div className="flex items-center justify-between text-sm">
                       <span>{metric.label}</span>
-                      <span className="font-medium">
-                        {metric.label === "Pace" ? "Good" : `${metric.value}%`}
-                      </span>
+                      <span className="font-medium">{metric.status}</span>
                     </div>
                     <ProgressBar
                       indicatorClassName={cn(
@@ -326,19 +435,32 @@ export function LiveSessionPage() {
                 ))}
               </div>
 
+              <div className="mt-6 rounded-2xl border border-border bg-shell px-4 py-4">
+                <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
+                  Coach cue
+                </p>
+                <p className="mt-3 text-sm leading-7 text-foreground">
+                  {renderedLiveMetrics.coachCue}
+                </p>
+              </div>
+
               <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                {performanceSignals.map((signal) => (
-                  <div
-                    key={signal.label}
-                    className="rounded-2xl border border-border bg-shell px-4 py-4"
-                  >
-                    <signal.icon className="h-4 w-4 text-primary" />
-                    <p className="mt-3 text-xs uppercase tracking-[0.28em] text-muted-foreground">
-                      {signal.label}
-                    </p>
-                    <p className="mt-2 text-base font-medium">{signal.value}</p>
-                  </div>
-                ))}
+                {renderedLiveMetrics.signals.map((signal) => {
+                  const SignalIcon = getSignalIcon(signal.label);
+
+                  return (
+                    <div
+                      key={signal.label}
+                      className="rounded-2xl border border-border bg-shell px-4 py-4"
+                    >
+                      <SignalIcon className="h-4 w-4 text-primary" />
+                      <p className="mt-3 text-xs uppercase tracking-[0.28em] text-muted-foreground">
+                        {signal.label}
+                      </p>
+                      <p className="mt-2 text-base font-medium">{signal.value}</p>
+                    </div>
+                  );
+                })}
               </div>
             </Panel>
           </div>
@@ -386,6 +508,13 @@ export function LiveSessionPage() {
               disabled={isDisconnecting}
               onClick={() => {
                 void (async () => {
+                  if (sessionPayload.transcript.length > 0) {
+                    const snapshot = createSessionSnapshot(sessionPayload);
+                    saveLastSessionSnapshot(snapshot);
+                    await endSession();
+                    navigate(`/results?session=${snapshot.id}`);
+                    return;
+                  }
                   await endSession();
                   navigate("/results");
                 })();
