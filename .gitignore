@@ -6,12 +6,19 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-
+.env
+.env.*
+!.env.example
 node_modules
 dist
 dist-ssr
 output
 *.local
+*.pem
+*.key
+*.crt
+*.p12
+.npmrc
 package-lock.json
 
 # Editor directories and files
