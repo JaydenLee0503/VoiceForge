@@ -1,26 +1,136 @@
 import {
+  Activity,
   Camera,
   CameraOff,
+  ChevronLeft,
+  LoaderCircle,
   Mic,
   MicOff,
   PhoneOff,
   Play,
   Radio,
   Sparkles,
+  Target,
+  TriangleAlert,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import {
-  liveMetrics,
-  liveTranscriptSeed,
-  performanceSignals,
-  scenarios,
-} from "@/shared/data/mock";
+import { buildDeterministicLiveMetricsSummary } from "../../../lib/voice-feedback/analysis";
+import type {
+  LiveMetricsSummary,
+  SessionAnalysisPayload,
+} from "../../../lib/voice-feedback/contracts";
+import { scenarios } from "@/shared/data/mock";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Panel } from "@/shared/ui/panel";
 import { ProgressBar } from "@/shared/ui/progress-bar";
+
+import { requestLiveMetrics } from "./feedback-client";
+import {
+  createSessionSnapshot,
+  saveLastSessionSnapshot,
+} from "./session-storage";
+import { useLiveSession } from "./use-live-session";
+
+type LivePageStatus =
+  | "connected"
+  | "connecting"
+  | "disconnected"
+  | "disconnecting"
+  | "idle";
+
+function getConnectionLabel(
+  mode: "elevenlabs" | "mock" | null,
+  sessionStatus: LivePageStatus,
+) {
+  if (sessionStatus === "connecting") {
+    return "Connecting";
+  }
+
+  if (sessionStatus === "disconnecting") {
+    return "Ending";
+  }
+
+  if (sessionStatus === "disconnected") {
+    return "Disconnected";
+  }
+
+  if (sessionStatus !== "connected") {
+    return "Standby";
+  }
+
+  return mode === "mock" ? "Mock session" : "ElevenLabs live";
+}
+
+function getCoachStatusLine(
+  speakerMode: "listening" | "speaking",
+  sessionStatus: LivePageStatus,
+) {
+  if (sessionStatus === "connecting") {
+    return "Opening the coach channel";
+  }
+
+  if (sessionStatus === "disconnecting") {
+    return "Closing the conversation";
+  }
+
+  if (sessionStatus !== "connected") {
+    return "Standing by";
+  }
+
+  return speakerMode === "speaking"
+    ? "Speaking and coaching in real time"
+    : "Listening and analyzing in real time";
+}
+
+function buildSessionPayload(
+  scenario: (typeof scenarios)[number],
+  transcript: SessionAnalysisPayload["transcript"],
+  durationSeconds: number,
+): SessionAnalysisPayload {
+  return {
+    durationSeconds,
+    scenario: {
+      description: scenario.description,
+      focus: scenario.focus,
+      id: scenario.id,
+      title: scenario.title,
+    },
+    transcript,
+  };
+}
+
+function mergeLiveMetrics(
+  base: LiveMetricsSummary,
+  overlay: LiveMetricsSummary,
+): LiveMetricsSummary {
+  return {
+    ...base,
+    coachCue: overlay.coachCue,
+    metrics: base.metrics.map((metric) => {
+      const overlayMetric = overlay.metrics.find(
+        (candidate) => candidate.label === metric.label,
+      );
+
+      return overlayMetric
+        ? {
+            ...metric,
+            status: overlayMetric.status,
+          }
+        : metric;
+    }),
+    model: overlay.model,
+    signals: overlay.signals,
+    source: overlay.source,
+    updatedAt: overlay.updatedAt,
+  };
+}
+
+function getSignalIcon(label: string) {
+  return label === "Primary aim" ? Target : Activity;
+}
 
 export function LiveSessionPage() {
   const navigate = useNavigate();
@@ -30,15 +140,52 @@ export function LiveSessionPage() {
     [scenarioId],
   );
 
-  const [sessionActive, setSessionActive] = useState(false);
-  const [muted, setMuted] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(true);
   const [seconds, setSeconds] = useState(0);
-  const [transcript, setTranscript] = useState<typeof liveTranscriptSeed>([]);
   const transcriptAnchor = useRef<HTMLDivElement | null>(null);
+  const secondsRef = useRef(0);
+  const {
+    disconnectMessage,
+    endSession,
+    error,
+    hasAudioStream,
+    mode,
+    muted,
+    notice,
+    sessionStatus,
+    speakerMode,
+    startSession,
+    toggleMuted,
+    transcript,
+  } = useLiveSession();
+  const sessionPayload = useMemo(
+    () => buildSessionPayload(scenario, transcript, seconds),
+    [scenario, transcript, seconds],
+  );
+  const deterministicLiveMetrics = useMemo(
+    () => buildDeterministicLiveMetricsSummary(sessionPayload),
+    [sessionPayload],
+  );
+  const [liveMetricsSummary, setLiveMetricsSummary] = useState(() =>
+    buildDeterministicLiveMetricsSummary(buildSessionPayload(scenario, [], 0)),
+  );
+
+  const isConnected = sessionStatus === "connected";
+  const isConnecting = sessionStatus === "connecting";
+  const isDisconnecting = sessionStatus === "disconnecting";
+  const statusMessage =
+    error ??
+    notice ??
+    (sessionStatus === "disconnected" && transcript.length > 0
+      ? disconnectMessage
+      : null);
 
   useEffect(() => {
-    if (!sessionActive) {
+    secondsRef.current = seconds;
+  }, [seconds]);
+
+  useEffect(() => {
+    if (!isConnected) {
       return undefined;
     }
 
@@ -47,27 +194,48 @@ export function LiveSessionPage() {
     }, 1000);
 
     return () => window.clearInterval(interval);
-  }, [sessionActive]);
-
-  useEffect(() => {
-    if (!sessionActive || transcript.length >= liveTranscriptSeed.length) {
-      return undefined;
-    }
-
-    const timeout = window.setTimeout(() => {
-      setTranscript((currentTranscript) => [
-        ...currentTranscript,
-        liveTranscriptSeed[currentTranscript.length],
-      ]);
-    }, 2400);
-
-    return () => window.clearTimeout(timeout);
-  }, [sessionActive, transcript]);
+  }, [isConnected]);
 
   useEffect(() => {
     transcriptAnchor.current?.scrollIntoView({ behavior: "smooth" });
   }, [transcript]);
 
+  useEffect(() => {
+    setLiveMetricsSummary((current) => mergeLiveMetrics(deterministicLiveMetrics, current));
+  }, [deterministicLiveMetrics]);
+
+  useEffect(() => {
+    if (!isConnected || !transcript.some((entry) => entry.role === "user")) {
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const requestPayload = buildSessionPayload(
+      scenario,
+      transcript,
+      secondsRef.current,
+    );
+
+    void requestLiveMetrics(requestPayload, controller.signal).then((summary) => {
+      if (controller.signal.aborted) {
+        return;
+      }
+
+      setLiveMetricsSummary((current) =>
+        mergeLiveMetrics(
+          buildDeterministicLiveMetricsSummary(requestPayload),
+          summary.updatedAt >= current.updatedAt ? summary : current,
+        ),
+      );
+    });
+
+    return () => controller.abort();
+  }, [isConnected, scenario, transcript]);
+
+  const renderedLiveMetrics = useMemo(
+    () => mergeLiveMetrics(deterministicLiveMetrics, liveMetricsSummary),
+    [deterministicLiveMetrics, liveMetricsSummary],
+  );
   const timerLabel = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(
     seconds % 60,
   ).padStart(2, "0")}`;
@@ -82,7 +250,7 @@ export function LiveSessionPage() {
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <Button size="icon" to="/scenarios" variant="secondary">
-                <span aria-hidden>←</span>
+                <ChevronLeft className="h-4 w-4" />
               </Button>
               <div>
                 <p className="text-sm text-muted-foreground">Live session</p>
@@ -96,10 +264,21 @@ export function LiveSessionPage() {
               <span className="rounded-full border border-border bg-panel px-4 py-2 font-mono text-sm">
                 {timerLabel}
               </span>
-              {sessionActive && (
+              {isConnecting && (
+                <span className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-2 text-sm text-primary">
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                  Connecting
+                </span>
+              )}
+              {isConnected && (
                 <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-sm text-emerald-300">
                   <Radio className="h-4 w-4 animate-pulse" />
-                  Live
+                  {mode === "mock" ? "Mock live" : "Live"}
+                </span>
+              )}
+              {sessionStatus === "disconnected" && transcript.length > 0 && (
+                <span className="rounded-full border border-border bg-panel px-4 py-2 text-sm text-muted-foreground">
+                  Disconnected
                 </span>
               )}
             </div>
@@ -113,7 +292,7 @@ export function LiveSessionPage() {
                 <div className="flex items-center gap-4">
                   <span className="relative flex h-14 w-14 items-center justify-center rounded-full border border-primary/30 bg-primary/10">
                     <Sparkles className="h-6 w-6 text-primary" />
-                    {sessionActive && (
+                    {isConnected && (
                       <span className="absolute inset-0 rounded-full border border-primary/50 animate-ping" />
                     )}
                   </span>
@@ -121,13 +300,15 @@ export function LiveSessionPage() {
                     <p className="text-sm text-muted-foreground">AI coach</p>
                     <h2 className="text-2xl font-semibold">Alex</h2>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {sessionActive ? "Listening and analyzing in real time" : "Standing by"}
+                      {getCoachStatusLine(speakerMode, sessionStatus)}
                     </p>
                   </div>
                 </div>
                 <div className="space-y-2 text-right text-sm text-muted-foreground">
                   <p>Focus</p>
                   <p className="font-medium text-foreground">{scenario.focus}</p>
+                  <p>{getConnectionLabel(mode, sessionStatus)}</p>
+                  <p>{hasAudioStream ? "Audio stream active" : "Audio standby"}</p>
                 </div>
               </div>
             </Panel>
@@ -145,21 +326,47 @@ export function LiveSessionPage() {
                 </span>
               </div>
 
+              {statusMessage && (
+                <div
+                  className={cn(
+                    "mt-6 rounded-2xl border px-4 py-3 text-sm",
+                    error && "border-danger/40 bg-danger/10 text-danger",
+                    !error && "border-border bg-shell text-muted-foreground",
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <TriangleAlert
+                      className={cn(
+                        "mt-0.5 h-4 w-4 shrink-0",
+                        error ? "text-danger" : "text-primary",
+                      )}
+                    />
+                    <p>{statusMessage}</p>
+                  </div>
+                </div>
+              )}
+
               <div className="mt-6 flex-1 space-y-4 overflow-y-auto pr-2">
                 {transcript.length === 0 && (
                   <div className="flex h-full items-center justify-center rounded-3xl border border-dashed border-border bg-shell text-center">
                     <div className="space-y-2 p-8">
-                      <p className="text-lg font-medium">Session feed is ready.</p>
+                      <p className="text-lg font-medium">
+                        {isConnecting
+                          ? "Opening the conversation feed..."
+                          : "Session feed is ready."}
+                      </p>
                       <p className="text-sm text-muted-foreground">
-                        Start the session to populate the live transcript and metrics.
+                        {isConnecting
+                          ? "VoiceForge is requesting a signed URL and preparing the live coach."
+                          : "Start the session to populate the live transcript and metrics."}
                       </p>
                     </div>
                   </div>
                 )}
 
-                {transcript.map((entry, index) => (
+                {transcript.map((entry) => (
                   <div
-                    key={`${entry.role}-${index}`}
+                    key={entry.id}
                     className={cn(
                       "flex gap-4",
                       entry.role === "user" && "justify-end",
@@ -210,13 +417,11 @@ export function LiveSessionPage() {
                 <span className="text-sm text-muted-foreground">Live feedback</span>
               </div>
               <div className="mt-6 space-y-5">
-                {liveMetrics.map((metric) => (
+                {renderedLiveMetrics.metrics.map((metric) => (
                   <div key={metric.label} className="space-y-3">
                     <div className="flex items-center justify-between text-sm">
                       <span>{metric.label}</span>
-                      <span className="font-medium">
-                        {metric.label === "Pace" ? "Good" : `${metric.value}%`}
-                      </span>
+                      <span className="font-medium">{metric.status}</span>
                     </div>
                     <ProgressBar
                       indicatorClassName={cn(
@@ -230,19 +435,32 @@ export function LiveSessionPage() {
                 ))}
               </div>
 
+              <div className="mt-6 rounded-2xl border border-border bg-shell px-4 py-4">
+                <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
+                  Coach cue
+                </p>
+                <p className="mt-3 text-sm leading-7 text-foreground">
+                  {renderedLiveMetrics.coachCue}
+                </p>
+              </div>
+
               <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                {performanceSignals.map((signal) => (
-                  <div
-                    key={signal.label}
-                    className="rounded-2xl border border-border bg-shell px-4 py-4"
-                  >
-                    <signal.icon className="h-4 w-4 text-primary" />
-                    <p className="mt-3 text-xs uppercase tracking-[0.28em] text-muted-foreground">
-                      {signal.label}
-                    </p>
-                    <p className="mt-2 text-base font-medium">{signal.value}</p>
-                  </div>
-                ))}
+                {renderedLiveMetrics.signals.map((signal) => {
+                  const SignalIcon = getSignalIcon(signal.label);
+
+                  return (
+                    <div
+                      key={signal.label}
+                      className="rounded-2xl border border-border bg-shell px-4 py-4"
+                    >
+                      <SignalIcon className="h-4 w-4 text-primary" />
+                      <p className="mt-3 text-xs uppercase tracking-[0.28em] text-muted-foreground">
+                        {signal.label}
+                      </p>
+                      <p className="mt-2 text-base font-medium">{signal.value}</p>
+                    </div>
+                  );
+                })}
               </div>
             </Panel>
           </div>
@@ -252,7 +470,9 @@ export function LiveSessionPage() {
       <footer className="fixed inset-x-0 bottom-0 border-t border-border bg-shell/95 backdrop-blur">
         <div className="mx-auto flex max-w-[1600px] items-center justify-center gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <Button
-            onClick={() => setMuted((current) => !current)}
+            onClick={() => {
+              void toggleMuted();
+            }}
             size="icon"
             variant="secondary"
           >
@@ -265,24 +485,45 @@ export function LiveSessionPage() {
           >
             {cameraEnabled ? <Camera className="h-5 w-5" /> : <CameraOff className="h-5 w-5" />}
           </Button>
-          {!sessionActive ? (
+          {!isConnected && !isDisconnecting ? (
             <Button
               className="min-w-44"
-              onClick={() => setSessionActive(true)}
+              disabled={isConnecting}
+              onClick={() => {
+                setSeconds(0);
+                void startSession(scenario);
+              }}
               size="lg"
             >
-              <Play className="h-4 w-4" />
-              Start session
+              {isConnecting ? (
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              ) : (
+                <Play className="h-4 w-4" />
+              )}
+              {isConnecting ? "Connecting..." : "Start session"}
             </Button>
           ) : (
             <Button
               className="min-w-44"
-              onClick={() => navigate("/results")}
+              disabled={isDisconnecting}
+              onClick={() => {
+                void (async () => {
+                  if (sessionPayload.transcript.length > 0) {
+                    const snapshot = createSessionSnapshot(sessionPayload);
+                    saveLastSessionSnapshot(snapshot);
+                    await endSession();
+                    navigate(`/results?session=${snapshot.id}`);
+                    return;
+                  }
+                  await endSession();
+                  navigate("/results");
+                })();
+              }}
               size="lg"
               variant="danger"
             >
               <PhoneOff className="h-4 w-4" />
-              End session
+              {isDisconnecting ? "Ending..." : "End session"}
             </Button>
           )}
           <Link className="text-sm text-muted-foreground hover:text-foreground" to="/scenarios">
