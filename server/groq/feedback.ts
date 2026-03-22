@@ -1,6 +1,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
+  buildDeterministicCustomPracticeQuestions,
+} from "../../lib/practice/question-generation";
+import type {
+  CustomPracticeQuestionRequest,
+  CustomPracticeQuestionResponse,
+} from "../../lib/practice/contracts";
+import {
   buildDeterministicFeedbackSummary,
   buildDeterministicLiveMetricsSummary,
   buildPromptSnapshot,
@@ -19,9 +26,16 @@ import {
 
 const LIVE_METRICS_PATH = "/api/groq/live-metrics";
 const SESSION_FEEDBACK_PATH = "/api/groq/session-feedback";
+const CUSTOM_PRACTICE_QUESTIONS_PATH = "/api/groq/custom-practice-questions";
+const LIVE_METRICS_PRIMARY_MODEL = "llama-3.1-8b-instant";
+const LIVE_METRICS_SECONDARY_MODEL = "qwen/qwen3-32b";
+const LIVE_METRICS_TERTIARY_MODEL = "llama-3.3-70b-versatile";
 const POST_SESSION_PRIMARY_MODEL = "llama-3.3-70b-versatile";
 const POST_SESSION_SECONDARY_MODEL = "qwen/qwen3-32b";
 const POST_SESSION_TERTIARY_MODEL = "llama-3.1-8b-instant";
+const CUSTOM_PRACTICE_PRIMARY_MODEL = "openai/gpt-oss-120b";
+const CUSTOM_PRACTICE_SECONDARY_MODEL = "llama-3.3-70b-versatile";
+const CUSTOM_PRACTICE_TERTIARY_MODEL = "qwen/qwen3-32b";
 
 type GroqServerConfig = {
   apiKey?: string;
@@ -42,6 +56,11 @@ type GroqLiveCopy = {
   liveSignal?: string;
   paceLabel?: string;
   primaryAim?: string;
+};
+
+type GroqPracticeQuestions = {
+  intro?: string;
+  questions?: string[];
 };
 
 type GroqFeedbackAnalyst = {
@@ -68,7 +87,7 @@ const POST_SESSION_ANALYSTS: readonly GroqFeedbackAnalyst[] = [
       POST_SESSION_TERTIARY_MODEL,
     ],
     systemPrompt:
-      "You are VoiceForge's strengths analyst. Return JSON only with keys bestMoment and coachSummary. Highlight the user's strongest exact speaking moment and write one short supportive summary. Keep each value concise, supportive, and under 22 words. Use the transcript and deterministic scores. Do not mention numeric scores.",
+      "You are VoiceForge's strengths analyst. Return JSON only with keys bestMoment and coachSummary. Each value must be one complete supportive sentence, not a fragment, quote, or single word. bestMoment should explain what the user said well and why it landed. coachSummary should summarize the session in a calm, useful way. Keep each value between 8 and 20 words. Do not mention numeric scores or repeat coach lines.",
   },
   {
     keyOrderOffset: 1,
@@ -80,7 +99,7 @@ const POST_SESSION_ANALYSTS: readonly GroqFeedbackAnalyst[] = [
       POST_SESSION_TERTIARY_MODEL,
     ],
     systemPrompt:
-      "You are VoiceForge's improvement analyst. Return JSON only with key improvementArea. Identify the clearest fix in one concise, supportive sentence under 24 words. Use the transcript and deterministic scores. Do not mention numeric scores.",
+      "You are VoiceForge's improvement analyst. Return JSON only with key improvementArea. Write one complete supportive sentence that names the clearest fix. Keep it between 8 and 20 words. Do not mention numeric scores, use labels like 'Pace:', or return fragments.",
   },
   {
     fields: ["nextChallenge"],
@@ -92,17 +111,15 @@ const POST_SESSION_ANALYSTS: readonly GroqFeedbackAnalyst[] = [
       POST_SESSION_TERTIARY_MODEL,
     ],
     systemPrompt:
-      "You are VoiceForge's next-step analyst. Return JSON only with key nextChallenge. Suggest the next practice focus in one concise, supportive sentence under 24 words. Use the transcript and deterministic scores. Do not mention numeric scores.",
+      "You are VoiceForge's next-step analyst. Return JSON only with key nextChallenge. Write one complete supportive sentence with the next practice challenge. Keep it between 8 and 20 words. Prefer an action-led suggestion. Do not mention numeric scores or return fragments.",
   },
 ] as const;
 
-function normalizeCopy(text: string | undefined, fallback: string, maxLength: number) {
-  const cleaned = text?.replace(/\s+/g, " ").trim();
+function cleanCopy(text: unknown) {
+  return typeof text === "string" ? text.replace(/\s+/g, " ").trim() : "";
+}
 
-  if (!cleaned) {
-    return fallback;
-  }
-
+function trimCopy(cleaned: string, maxLength: number) {
   if (cleaned.length <= maxLength) {
     return cleaned;
   }
@@ -113,6 +130,40 @@ function normalizeCopy(text: string | undefined, fallback: string, maxLength: nu
     lastSpace > 20 ? trimmed.slice(0, lastSpace).trim() : trimmed;
 
   return /[.!?]$/.test(compact) ? compact : `${compact}.`;
+}
+
+function normalizeCopy(text: unknown, fallback: string, maxLength: number) {
+  const cleaned = cleanCopy(text);
+
+  if (!cleaned) {
+    return fallback;
+  }
+
+  return trimCopy(cleaned, maxLength);
+}
+
+function normalizeMeaningfulCopy(
+  text: unknown,
+  fallback: string,
+  maxLength: number,
+  minWords: number,
+  minLength: number,
+) {
+  const cleaned = cleanCopy(text);
+
+  if (!cleaned) {
+    return fallback;
+  }
+
+  const unlabeled = cleaned.replace(/^[A-Z][A-Za-z ]{0,20}:\s*/, "");
+  const normalized = trimCopy(unlabeled, maxLength);
+  const wordCount = normalized.split(/\s+/).filter(Boolean).length;
+
+  if (normalized.length < minLength || wordCount < minWords) {
+    return fallback;
+  }
+
+  return normalized;
 }
 
 function getConfiguredGroqApiKeys(config: GroqServerConfig) {
@@ -214,22 +265,34 @@ async function enrichFeedbackWithGroq(
 
   return {
     ...fallback,
-    bestMoment: normalizeCopy(analystCopy.bestMoment, fallback.bestMoment, 150),
-    coachSummary: normalizeCopy(
+    bestMoment: normalizeMeaningfulCopy(
+      analystCopy.bestMoment,
+      fallback.bestMoment,
+      150,
+      6,
+      36,
+    ),
+    coachSummary: normalizeMeaningfulCopy(
       analystCopy.coachSummary,
       fallback.coachSummary,
       160,
+      7,
+      42,
     ),
-    improvementArea: normalizeCopy(
+    improvementArea: normalizeMeaningfulCopy(
       analystCopy.improvementArea,
       fallback.improvementArea,
       170,
+      6,
+      38,
     ),
     model: modelSummary || null,
-    nextChallenge: normalizeCopy(
+    nextChallenge: normalizeMeaningfulCopy(
       analystCopy.nextChallenge,
       fallback.nextChallenge,
       170,
+      6,
+      38,
     ),
     source: "groq",
   };
@@ -254,6 +317,11 @@ async function enrichLiveMetricsWithGroq(
         content: JSON.stringify(snapshot),
         role: "user",
       },
+    ],
+    modelPreferences: [
+      LIVE_METRICS_PRIMARY_MODEL,
+      LIVE_METRICS_SECONDARY_MODEL,
+      LIVE_METRICS_TERTIARY_MODEL,
     ],
   });
 
@@ -301,6 +369,63 @@ async function enrichLiveMetricsWithGroq(
     ],
     source: "groq",
     updatedAt: Date.now(),
+  };
+}
+
+function normalizePracticeQuestions(
+  candidateQuestions: unknown,
+  fallbackQuestions: CustomPracticeQuestionResponse["questions"],
+) {
+  if (!Array.isArray(candidateQuestions)) {
+    return fallbackQuestions;
+  }
+
+  const questions = candidateQuestions
+    .map((question) => (typeof question === "string" ? question.trim() : ""))
+    .filter((question) => question.length > 0)
+    .slice(0, fallbackQuestions.length);
+
+  if (questions.length !== fallbackQuestions.length) {
+    return fallbackQuestions;
+  }
+
+  return questions.map((question, index) => ({
+    id: fallbackQuestions[index]?.id ?? `cp-${index + 1}`,
+    text: trimCopy(question, 180),
+  }));
+}
+
+async function enrichCustomPracticeQuestionsWithGroq(
+  apiKeys: string[],
+  request: CustomPracticeQuestionRequest,
+  fallback: CustomPracticeQuestionResponse,
+): Promise<CustomPracticeQuestionResponse> {
+  const response = await requestGroqJsonWithFallback<GroqPracticeQuestions>({
+    apiKeys,
+    maxCompletionTokens: 420,
+    messages: [
+      {
+        content:
+          "You design thoughtful speaking rehearsal prompts for VoiceForge. Return JSON only with keys intro and questions. intro must be one short sentence. questions must be an array of varied, creative, high-signal speaking prompts tailored to the user's topic, audience, goal, and intensity. Avoid repetition, trivia, and generic filler.",
+        role: "system",
+      },
+      {
+        content: JSON.stringify(request),
+        role: "user",
+      },
+    ],
+    modelPreferences: [
+      CUSTOM_PRACTICE_PRIMARY_MODEL,
+      CUSTOM_PRACTICE_SECONDARY_MODEL,
+      CUSTOM_PRACTICE_TERTIARY_MODEL,
+    ],
+  });
+
+  return {
+    intro: normalizeCopy(response.intro, fallback.intro, 140),
+    model: response.model,
+    questions: normalizePracticeQuestions(response.questions, fallback.questions),
+    source: "groq",
   };
 }
 
@@ -388,6 +513,45 @@ async function handleLiveMetricsRequest(
   }
 }
 
+async function handleCustomPracticeQuestionsRequest(
+  config: GroqServerConfig,
+  req: IncomingMessage,
+  res: ServerResponse,
+) {
+  let payload: CustomPracticeQuestionRequest;
+
+  try {
+    payload = await readJsonBody<CustomPracticeQuestionRequest>(req);
+  } catch (error) {
+    sendJson(res, 400, {
+      message:
+        error instanceof Error ? error.message : "Invalid custom practice request body.",
+      mode: "error",
+    });
+    return;
+  }
+
+  const fallback = buildDeterministicCustomPracticeQuestions(payload);
+  const configuredApiKeys = getConfiguredGroqApiKeys(config);
+
+  if (configuredApiKeys.length === 0) {
+    sendJson(res, 200, fallback);
+    return;
+  }
+
+  try {
+    const questionSet = await enrichCustomPracticeQuestionsWithGroq(
+      configuredApiKeys,
+      payload,
+      fallback,
+    );
+    sendJson(res, 200, questionSet);
+  } catch (error) {
+    console.warn("[voiceforge] Groq custom practice fallback:", error);
+    sendJson(res, 200, fallback);
+  }
+}
+
 export function createGroqFeedbackMiddleware(config: GroqServerConfig) {
   return async (
     req: IncomingMessage,
@@ -417,6 +581,19 @@ export function createGroqFeedbackMiddleware(config: GroqServerConfig) {
       }
 
       await handleLiveMetricsRequest(config, req, res);
+      return;
+    }
+
+    if (matchesRoute(req, CUSTOM_PRACTICE_QUESTIONS_PATH)) {
+      if (req.method !== "POST") {
+        sendJson(res, 405, {
+          message: "Method not allowed.",
+          mode: "error",
+        });
+        return;
+      }
+
+      await handleCustomPracticeQuestionsRequest(config, req, res);
       return;
     }
 

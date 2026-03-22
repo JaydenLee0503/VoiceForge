@@ -3,6 +3,11 @@
   "files": {
     "includes": ["src/**/*.{js,jsx,ts,tsx}"]
   },
+  "vcs": {
+    "clientKind": "git",
+    "enabled": true,
+    "useIgnoreFile": true
+  },
   "linter": {
     "enabled": true,
     "rules": {

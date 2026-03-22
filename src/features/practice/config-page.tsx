@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { AppShell } from "@/shared/layout/app-shell";
@@ -6,8 +6,14 @@ import { PageIntro } from "@/shared/layout/page-intro";
 import { Button } from "@/shared/ui/button";
 import { Panel } from "@/shared/ui/panel";
 import { Range } from "@/shared/ui/range";
+import type { CustomPracticeSettings } from "../../../lib/voice-feedback/contracts";
 
-const STORAGE_KEY = "voiceforge-custom-practice";
+import {
+  DEFAULT_CUSTOM_PRACTICE_SETTINGS,
+  loadCustomPracticeSettings,
+  normalizeCustomPracticeSettings,
+  saveCustomPracticeSettings,
+} from "./custom-practice-storage";
 
 function formatDuration(seconds: number) {
   if (seconds < 60) {
@@ -26,15 +32,29 @@ function formatDuration(seconds: number) {
 
 export function CustomPracticeConfigPage() {
   const navigate = useNavigate();
-  const [questionCount, setQuestionCount] = useState(5);
-  const [prepTime, setPrepTime] = useState(60);
-  const [answerTime, setAnswerTime] = useState(120);
+  const persistedSettings =
+    loadCustomPracticeSettings() ?? DEFAULT_CUSTOM_PRACTICE_SETTINGS;
+  const [settings, setSettings] = useState<CustomPracticeSettings>(persistedSettings);
+
+  const estimatedSessionLength = useMemo(
+    () => settings.questionCount * (settings.prepTime + settings.answerTime),
+    [settings.answerTime, settings.prepTime, settings.questionCount],
+  );
+
+  function updateSetting(
+    key: "answerTime" | "prepTime" | "questionCount",
+    value: number,
+  ) {
+    setSettings((current) =>
+      normalizeCustomPracticeSettings({
+        ...current,
+        [key]: value,
+      }),
+    );
+  }
 
   function startSession() {
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ answerTime, prepTime, questionCount }),
-    );
+    saveCustomPracticeSettings(normalizeCustomPracticeSettings(settings));
     navigate("/practice/custom/session");
   }
 
@@ -42,49 +62,52 @@ export function CustomPracticeConfigPage() {
     <AppShell>
       <div className="mx-auto max-w-4xl space-y-8">
         <PageIntro
-          description="Configure a lightweight drill session without picking a preset scenario."
+          description="Choose the length of the drill and start. VoiceForge will handle the prompts."
           eyebrow="Custom Practice"
-          title="Build your own rehearsal"
+          title="Timed speaking drill"
         />
 
         <Panel className="p-6 sm:p-8" elevated>
-          <div className="space-y-10">
+          <div className="space-y-8">
             <RangeField
-              label="Practice questions"
-              max={12}
+              label="Number of questions"
+              max={10}
               min={3}
-              onChange={(value) => setQuestionCount(value)}
-              value={questionCount}
+              onChange={(value) => updateSetting("questionCount", value)}
+              value={settings.questionCount}
             />
             <RangeField
               label="Preparation time"
               max={180}
               min={15}
-              onChange={(value) => setPrepTime(value)}
+              onChange={(value) => updateSetting("prepTime", value)}
               step={15}
-              value={prepTime}
-              valueLabel={formatDuration(prepTime)}
+              value={settings.prepTime}
+              valueLabel={formatDuration(settings.prepTime)}
             />
             <RangeField
               label="Answer time"
               max={240}
               min={30}
-              onChange={(value) => setAnswerTime(value)}
+              onChange={(value) => updateSetting("answerTime", value)}
               step={15}
-              value={answerTime}
-              valueLabel={formatDuration(answerTime)}
+              value={settings.answerTime}
+              valueLabel={formatDuration(settings.answerTime)}
             />
-          </div>
 
-          <div className="mt-10 flex flex-col gap-4 rounded-3xl border border-border bg-shell p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
-                Estimated session length
-              </p>
-              <p className="mt-2 text-2xl font-semibold">
-                {formatDuration(questionCount * (prepTime + answerTime))}
+            <div className="rounded-3xl border border-border bg-shell p-5">
+              <div className="flex items-center justify-between gap-4 text-sm">
+                <span className="text-muted-foreground">Estimated total session length</span>
+                <span className="font-medium text-foreground">
+                  {formatDuration(estimatedSessionLength)}
+                </span>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                VoiceForge will generate a simple timed drill and move you from prep
+                into answer mode automatically.
               </p>
             </div>
+
             <Button onClick={startSession} size="lg">
               Start custom session
             </Button>
@@ -97,11 +120,11 @@ export function CustomPracticeConfigPage() {
 
 type RangeFieldProps = {
   label: string;
-  min: number;
   max: number;
-  value: number;
+  min: number;
   onChange: (value: number) => void;
   step?: number;
+  value: number;
   valueLabel?: string;
 };
 

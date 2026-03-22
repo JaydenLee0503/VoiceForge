@@ -16,18 +16,29 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import { buildDeterministicLiveMetricsSummary } from "../../../lib/voice-feedback/analysis";
-import type {
-  LiveMetricsSummary,
-  SessionAnalysisPayload,
-} from "../../../lib/voice-feedback/contracts";
+import { CameraPresencePanel } from "@/components/session/CameraPresencePanel";
+import {
+  type CameraRecorderStatus,
+  useSessionCameraRecorder,
+} from "@/hooks/useSessionCameraRecorder";
+import { useSessionExitGuard } from "@/hooks/useSessionExitGuard";
+import { createUnavailablePresenceResult } from "@/lib/scoring/nonVerbalScore";
+import { syncSessionToSupabase } from "@/lib/supabase/session-store";
 import { scenarios } from "@/shared/data/mock";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Panel } from "@/shared/ui/panel";
 import { ProgressBar } from "@/shared/ui/progress-bar";
+import type { PresenceSessionResult } from "@/types/presence";
+import { buildDeterministicLiveMetricsSummary } from "../../../lib/voice-feedback/analysis";
+import type {
+  LiveMetricsSummary,
+  SessionAnalysisPayload,
+  SessionCameraRecording,
+} from "../../../lib/voice-feedback/contracts";
 
 import { requestLiveMetrics } from "./feedback-client";
+import { saveSessionCameraRecording } from "./session-camera-storage";
 import {
   createSessionSnapshot,
   saveLastSessionSnapshot,
@@ -89,9 +100,13 @@ function buildSessionPayload(
   scenario: (typeof scenarios)[number],
   transcript: SessionAnalysisPayload["transcript"],
   durationSeconds: number,
+  cameraRecording: SessionCameraRecording | null,
+  presence: PresenceSessionResult | null = null,
 ): SessionAnalysisPayload {
   return {
+    cameraRecording,
     durationSeconds,
+    presence,
     scenario: {
       description: scenario.description,
       focus: scenario.focus,
@@ -100,6 +115,34 @@ function buildSessionPayload(
     },
     transcript,
   };
+}
+
+function getSessionEndPresenceFallback(
+  cameraEnabled: boolean,
+  cameraStatus: CameraRecorderStatus,
+  hasRecording: boolean,
+): PresenceSessionResult | null {
+  if (hasRecording) {
+    return null;
+  }
+
+  if (!cameraEnabled || cameraStatus === "disabled") {
+    return createUnavailablePresenceResult("camera_disabled");
+  }
+
+  if (cameraStatus === "permission-denied") {
+    return createUnavailablePresenceResult("camera_denied");
+  }
+
+  if (cameraStatus === "unsupported") {
+    return createUnavailablePresenceResult("camera_unsupported");
+  }
+
+  if (cameraStatus === "error") {
+    return createUnavailablePresenceResult("camera_error");
+  }
+
+  return null;
 }
 
 function mergeLiveMetrics(
@@ -141,6 +184,8 @@ export function LiveSessionPage() {
   );
 
   const [cameraEnabled, setCameraEnabled] = useState(true);
+  const [isFinalizingSession, setIsFinalizingSession] = useState(false);
+  const [sessionDraftId, setSessionDraftId] = useState<string | null>(null);
   const [seconds, setSeconds] = useState(0);
   const transcriptAnchor = useRef<HTMLDivElement | null>(null);
   const secondsRef = useRef(0);
@@ -158,21 +203,26 @@ export function LiveSessionPage() {
     toggleMuted,
     transcript,
   } = useLiveSession();
+  const isConnected = sessionStatus === "connected";
+  const isConnecting = sessionStatus === "connecting";
+  const isDisconnecting = sessionStatus === "disconnecting";
+  const sessionCamera = useSessionCameraRecorder({
+    enabled: cameraEnabled,
+    isSessionActive: isConnected,
+    sessionId: sessionDraftId,
+  });
   const sessionPayload = useMemo(
-    () => buildSessionPayload(scenario, transcript, seconds),
-    [scenario, transcript, seconds],
+    () => buildSessionPayload(scenario, transcript, seconds, null),
+    [scenario, seconds, transcript],
   );
   const deterministicLiveMetrics = useMemo(
     () => buildDeterministicLiveMetricsSummary(sessionPayload),
     [sessionPayload],
   );
   const [liveMetricsSummary, setLiveMetricsSummary] = useState(() =>
-    buildDeterministicLiveMetricsSummary(buildSessionPayload(scenario, [], 0)),
+    buildDeterministicLiveMetricsSummary(buildSessionPayload(scenario, [], 0, null)),
   );
 
-  const isConnected = sessionStatus === "connected";
-  const isConnecting = sessionStatus === "connecting";
-  const isDisconnecting = sessionStatus === "disconnecting";
   const statusMessage =
     error ??
     notice ??
@@ -214,6 +264,7 @@ export function LiveSessionPage() {
       scenario,
       transcript,
       secondsRef.current,
+      null,
     );
 
     void requestLiveMetrics(requestPayload, controller.signal).then((summary) => {
@@ -236,6 +287,28 @@ export function LiveSessionPage() {
     () => mergeLiveMetrics(deterministicLiveMetrics, liveMetricsSummary),
     [deterministicLiveMetrics, liveMetricsSummary],
   );
+  const hasPendingSessionExit =
+    transcript.length > 0 ||
+    isConnecting ||
+    isConnected ||
+    isDisconnecting ||
+    sessionCamera.isRecording;
+  const { allowNextNavigation } = useSessionExitGuard({
+    enabled: hasPendingSessionExit,
+    message:
+      "Discard this in-progress session and leave the page? Your current transcript and recording will not be saved.",
+    onDiscard: async () => {
+      await sessionCamera.finalizeRecording();
+
+      if (
+        sessionStatus === "connecting" ||
+        sessionStatus === "connected" ||
+        sessionStatus === "disconnecting"
+      ) {
+        await endSession();
+      }
+    },
+  });
   const timerLabel = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(
     seconds % 60,
   ).padStart(2, "0")}`;
@@ -393,23 +466,12 @@ export function LiveSessionPage() {
           </div>
 
           <div className="space-y-6">
-            <Panel className="overflow-hidden p-0" elevated>
-              <div className="border-b border-border px-6 py-4">
-                <h2 className="text-lg font-semibold">Presence feed</h2>
-              </div>
-              <div className="relative aspect-video bg-shell">
-                {cameraEnabled ? (
-                  <>
-                    <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-primary-soft/10" />
-                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(108,141,255,0.18),_transparent_55%)]" />
-                  </>
-                ) : (
-                  <div className="flex h-full items-center justify-center text-muted-foreground">
-                    <CameraOff className="h-10 w-10" />
-                  </div>
-                )}
-              </div>
-            </Panel>
+            <CameraPresencePanel
+              cameraEnabled={cameraEnabled}
+              status={sessionCamera.status}
+              statusMessage={sessionCamera.statusMessage}
+              videoRef={sessionCamera.videoRef}
+            />
 
             <Panel className="p-6" elevated>
               <div className="flex items-center justify-between">
@@ -491,6 +553,7 @@ export function LiveSessionPage() {
               disabled={isConnecting}
               onClick={() => {
                 setSeconds(0);
+                setSessionDraftId(`vf-${Date.now().toString(36)}`);
                 void startSession(scenario);
               }}
               size="lg"
@@ -505,25 +568,82 @@ export function LiveSessionPage() {
           ) : (
             <Button
               className="min-w-44"
-              disabled={isDisconnecting}
+              disabled={isDisconnecting || isFinalizingSession}
               onClick={() => {
+                if (isFinalizingSession) {
+                  return;
+                }
+
                 void (async () => {
-                  if (sessionPayload.transcript.length > 0) {
-                    const snapshot = createSessionSnapshot(sessionPayload);
+                  setIsFinalizingSession(true);
+                  const finalizedRecording = await sessionCamera.finalizeRecording();
+                  let recordingReference: SessionCameraRecording | null =
+                    finalizedRecording?.recording ?? null;
+                  let presenceFallback: PresenceSessionResult | null = null;
+
+                  if (finalizedRecording) {
+                    try {
+                      await saveSessionCameraRecording(
+                        finalizedRecording.recording,
+                        finalizedRecording.blob,
+                      );
+                    } catch (error) {
+                      console.warn(
+                        "[voiceforge] Failed to store the session camera recording:",
+                        error,
+                      );
+                    }
+                  }
+
+                  const completedPayload = buildSessionPayload(
+                    scenario,
+                    transcript,
+                    secondsRef.current,
+                    recordingReference,
+                    presenceFallback ??
+                      getSessionEndPresenceFallback(
+                        cameraEnabled,
+                        sessionCamera.status,
+                        recordingReference !== null,
+                      ),
+                  );
+
+                  if (
+                    completedPayload.transcript.length > 0 ||
+                    completedPayload.cameraRecording !== null
+                  ) {
+                    const snapshot = createSessionSnapshot(
+                      completedPayload,
+                      sessionDraftId ?? undefined,
+                    );
                     saveLastSessionSnapshot(snapshot);
-                    await endSession();
+                    allowNextNavigation();
                     navigate(`/results?session=${snapshot.id}`);
+                    void endSession();
+                    void syncSessionToSupabase({
+                      feedback: null,
+                      recordingBlob: finalizedRecording?.blob ?? null,
+                      snapshot,
+                    }).catch((error) => {
+                      console.warn(
+                        "[voiceforge] Initial session upload failed, results page will retry:",
+                        error,
+                      );
+                    });
                     return;
                   }
-                  await endSession();
+                  allowNextNavigation();
                   navigate("/results");
-                })();
+                  void endSession();
+                })().finally(() => {
+                  setIsFinalizingSession(false);
+                });
               }}
               size="lg"
               variant="danger"
             >
               <PhoneOff className="h-4 w-4" />
-              {isDisconnecting ? "Ending..." : "End session"}
+              {isDisconnecting || isFinalizingSession ? "Ending..." : "End session"}
             </Button>
           )}
           <Link className="text-sm text-muted-foreground hover:text-foreground" to="/scenarios">

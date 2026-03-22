@@ -1,10 +1,26 @@
+import type { PresenceSessionResult } from "../../src/types/presence";
+
 export type FeedbackSource = "deterministic" | "groq" | "mock";
+export type CustomPracticeIntensity =
+  | "clarity"
+  | "exploratory"
+  | "pressure-test";
 
 export type SessionAnalysisScenario = {
   description: string;
   focus: string;
   id: string;
   title: string;
+};
+
+export type CustomPracticeSettings = {
+  answerTime: number;
+  audience: string;
+  goal: string;
+  intensity: CustomPracticeIntensity;
+  prepTime: number;
+  questionCount: number;
+  topic: string;
 };
 
 export type SessionTranscriptEntry = {
@@ -14,10 +30,19 @@ export type SessionTranscriptEntry = {
   timestamp: number;
 };
 
-export type SessionAnalysisPayload = {
-  durationSeconds: number;
-  scenario: SessionAnalysisScenario;
-  transcript: SessionTranscriptEntry[];
+export type SessionQuestionPrompt = {
+  id: string;
+  text: string;
+};
+
+export type SessionCameraRecording = {
+  durationMs: number;
+  hasAudio: boolean;
+  height: number;
+  id: string;
+  mimeType: string;
+  source: "browser_media_recorder";
+  width: number;
 };
 
 export type FeedbackScores = {
@@ -26,6 +51,30 @@ export type FeedbackScores = {
   pace: number;
   eyeContactPresence: number;
   fillerWords: number;
+};
+
+export type VerbalMetricsSummary = {
+  averageWordsPerUtterance: number;
+  fillerCount: number;
+  fillerWordBreakdown: Record<string, number>;
+  hedgeCount: number;
+  questionCount: number;
+  scores: FeedbackScores;
+  totalUserWords: number;
+  wordsPerMinute: number;
+};
+
+export type SessionAnalysisPayload = {
+  cameraRecording?: SessionCameraRecording | null;
+  customPracticeSettings?: CustomPracticeSettings | null;
+  displayTranscript?: string | null;
+  durationSeconds: number;
+  generatedQuestions?: SessionQuestionPrompt[] | null;
+  presence?: PresenceSessionResult | null;
+  rawTranscript?: string | null;
+  scenario: SessionAnalysisScenario;
+  transcript: SessionTranscriptEntry[];
+  verbalMetrics?: VerbalMetricsSummary | null;
 };
 
 export type TranscriptHighlight = {

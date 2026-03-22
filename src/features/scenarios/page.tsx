@@ -1,10 +1,10 @@
 import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { scenarioCategories, scenarios } from "@/shared/data/mock";
 import { AppShell } from "@/shared/layout/app-shell";
 import { PageIntro } from "@/shared/layout/page-intro";
-import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Panel } from "@/shared/ui/panel";
 import { SegmentedControl } from "@/shared/ui/segmented-control";
@@ -57,38 +57,46 @@ export function ScenariosPage() {
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filteredScenarios.map((scenario) => (
-            <Panel key={scenario.id} className="flex h-full flex-col p-6" elevated>
-              <div className="flex items-start justify-between gap-4">
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-border bg-shell">
-                  <scenario.icon className="h-5 w-5 text-primary" />
-                </span>
-                <span className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-                  {scenario.difficulty}
-                </span>
-              </div>
-
-              <div className="mt-6 space-y-3">
-                <h2 className="text-2xl font-semibold">{scenario.title}</h2>
-                <p className="text-sm leading-6 text-muted-foreground">
-                  {scenario.description}
-                </p>
-              </div>
-
-              <div className="mt-6 grid gap-3 text-sm text-muted-foreground">
-                <div className="rounded-2xl border border-border bg-shell px-4 py-3">
-                  Focus: <span className="text-foreground">{scenario.focus}</span>
+            <Link
+              key={scenario.id}
+              aria-label={`Open ${scenario.title}`}
+              className="group block h-full rounded-3xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              to={`/session/${scenario.id}`}
+            >
+              <Panel
+                className="flex h-full flex-col p-6 transition duration-200 hover:border-primary/40 hover:bg-panel hover:shadow-glow"
+                elevated
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-border bg-shell">
+                    <scenario.icon className="h-5 w-5 text-primary" />
+                  </span>
+                  <span className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+                    {scenario.difficulty}
+                  </span>
                 </div>
-                <div className="rounded-2xl border border-border bg-shell px-4 py-3">
-                  Estimated time: <span className="text-foreground">{scenario.duration}</span>
-                </div>
-              </div>
 
-              <div className="mt-6">
-                <Button className="w-full" to={`/session/${scenario.id}`}>
+                <div className="mt-6 space-y-3">
+                  <h2 className="text-2xl font-semibold">{scenario.title}</h2>
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    {scenario.description}
+                  </p>
+                </div>
+
+                <div className="mt-6 grid gap-3 text-sm text-muted-foreground">
+                  <div className="rounded-2xl border border-border bg-shell px-4 py-3">
+                    Focus: <span className="text-foreground">{scenario.focus}</span>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-shell px-4 py-3">
+                    Estimated time: <span className="text-foreground">{scenario.duration}</span>
+                  </div>
+                </div>
+
+                <div className="mt-6 rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 text-center text-sm font-medium text-foreground transition group-hover:border-primary/40">
                   Start practice
-                </Button>
-              </div>
-            </Panel>
+                </div>
+              </Panel>
+            </Link>
           ))}
         </div>
 
