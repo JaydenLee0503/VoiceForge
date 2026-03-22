@@ -1,21 +1,45 @@
+import {
+  ChevronLeft,
+  LoaderCircle,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { practiceQuestions } from "@/shared/data/mock";
+import { CameraPresencePanel } from "@/components/session/CameraPresencePanel";
+import { useBrowserSpeechTranscript } from "@/hooks/useBrowserSpeechTranscript";
+import {
+  type CameraRecorderStatus,
+  useSessionCameraRecorder,
+} from "@/hooks/useSessionCameraRecorder";
+import { useSessionExitGuard } from "@/hooks/useSessionExitGuard";
+import { createUnavailablePresenceResult } from "@/lib/scoring/nonVerbalScore";
+import { syncSessionToSupabase } from "@/lib/supabase/session-store";
+import { buildDisplayTranscript, buildRawTranscript } from "@/lib/transcript/formatting";
 import { AppShell } from "@/shared/layout/app-shell";
 import { Button } from "@/shared/ui/button";
 import { Panel } from "@/shared/ui/panel";
 import { ProgressBar } from "@/shared/ui/progress-bar";
+import {
+  buildVerbalMetricsSummary,
+} from "../../../lib/voice-feedback/analysis";
+import type {
+  CustomPracticeSettings,
+  SessionAnalysisPayload,
+  SessionCameraRecording,
+  SessionTranscriptEntry,
+} from "../../../lib/voice-feedback/contracts";
+import { saveSessionCameraRecording } from "../session/session-camera-storage";
+import {
+  createSessionSnapshot,
+  saveLastSessionSnapshot,
+} from "../session/session-storage";
+import { requestCustomPracticeQuestions } from "./custom-practice-client";
+import {
+  buildCustomPracticeScenario,
+  loadCustomPracticeSettings,
+} from "./custom-practice-storage";
 
-const STORAGE_KEY = "voiceforge-custom-practice";
-
-type PracticeConfig = {
-  questionCount: number;
-  prepTime: number;
-  answerTime: number;
-};
-
-type PracticeStage = "prep" | "answer" | "complete";
+type PracticeStage = "answer" | "loading" | "prep";
 
 function formatTimer(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
@@ -24,35 +48,193 @@ function formatTimer(totalSeconds: number) {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+function formatDuration(seconds: number) {
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+
+  if (remainder === 0) {
+    return `${minutes}m`;
+  }
+
+  return `${minutes}m ${remainder}s`;
+}
+
+function getPresenceFallback(
+  cameraEnabled: boolean,
+  cameraStatus: CameraRecorderStatus,
+  hasRecording: boolean,
+) {
+  if (hasRecording) {
+    return null;
+  }
+
+  if (!cameraEnabled || cameraStatus === "disabled") {
+    return createUnavailablePresenceResult("camera_disabled");
+  }
+
+  if (cameraStatus === "permission-denied") {
+    return createUnavailablePresenceResult("camera_denied");
+  }
+
+  if (cameraStatus === "unsupported") {
+    return createUnavailablePresenceResult("camera_unsupported");
+  }
+
+  if (cameraStatus === "error") {
+    return createUnavailablePresenceResult("camera_error");
+  }
+
+  return null;
+}
+
 export function CustomPracticeSessionPage() {
   const navigate = useNavigate();
-  const [config, setConfig] = useState<PracticeConfig | null>(null);
-  const [questionIndex, setQuestionIndex] = useState(0);
-  const [stage, setStage] = useState<PracticeStage>("prep");
+  const [cameraEnabled, setCameraEnabled] = useState(true);
+  const [config, setConfig] = useState<CustomPracticeSettings | null>(null);
   const [timeLeft, setTimeLeft] = useState(0);
+  const [questionIndex, setQuestionIndex] = useState(0);
+  const [stage, setStage] = useState<PracticeStage>("loading");
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [questionSet, setQuestionSet] = useState<Awaited<
+    ReturnType<typeof requestCustomPracticeQuestions>
+  > | null>(null);
+  const [isCompleting, setIsCompleting] = useState(false);
+  const [promptTurns, setPromptTurns] = useState<SessionTranscriptEntry[]>([]);
+  const [captureStarted, setCaptureStarted] = useState(false);
+  const [sessionId] = useState(() => `vf-cp-${Date.now().toString(36)}`);
+
+  const speechTranscript = useBrowserSpeechTranscript({
+    enabled: true,
+    isCapturing: stage === "answer" && !isCompleting,
+    sessionId,
+  });
+  const sessionCamera = useSessionCameraRecorder({
+    enabled: cameraEnabled,
+    isSessionActive: captureStarted && !isCompleting,
+    sessionId,
+  });
 
   useEffect(() => {
-    const storedConfig = window.localStorage.getItem(STORAGE_KEY);
+    const storedConfig = loadCustomPracticeSettings();
+
     if (!storedConfig) {
       navigate("/practice/custom", { replace: true });
       return;
     }
 
-    const parsedConfig = JSON.parse(storedConfig) as PracticeConfig;
-    setConfig(parsedConfig);
-    setTimeLeft(parsedConfig.prepTime);
+    setConfig(storedConfig);
+
+    void requestCustomPracticeQuestions({
+      audience: storedConfig.audience,
+      goal: storedConfig.goal,
+      intensity: storedConfig.intensity,
+      questionCount: storedConfig.questionCount,
+      topic: storedConfig.topic,
+    }).then((response) => {
+      setQuestionSet(response);
+      setStage("prep");
+      setTimeLeft(storedConfig.prepTime);
+    });
   }, [navigate]);
 
-  const selectedQuestions = useMemo(() => {
-    if (!config) {
-      return [];
-    }
-
-    return practiceQuestions.slice(0, config.questionCount);
-  }, [config]);
+  const currentQuestion = questionSet?.questions[questionIndex] ?? null;
 
   useEffect(() => {
-    if (!config || stage === "complete") {
+    if (!currentQuestion) {
+      return;
+    }
+
+    setPromptTurns((currentTurns) => {
+      const nextTurnId = `prompt-${currentQuestion.id}`;
+
+      if (currentTurns.some((turn) => turn.id === nextTurnId)) {
+        return currentTurns;
+      }
+
+      return [
+        ...currentTurns,
+        {
+          id: nextTurnId,
+          role: "coach",
+          text: currentQuestion.text,
+          timestamp: Date.now(),
+        },
+      ];
+    });
+  }, [currentQuestion]);
+
+  const transcript = useMemo(
+    () =>
+      [...promptTurns, ...speechTranscript.transcript].sort(
+        (left, right) => left.timestamp - right.timestamp,
+      ),
+    [promptTurns, speechTranscript.transcript],
+  );
+  const scenario = useMemo(
+    () => (config ? buildCustomPracticeScenario(config) : null),
+    [config],
+  );
+  const basePayload = useMemo<SessionAnalysisPayload | null>(() => {
+    if (!config || !scenario || !questionSet) {
+      return null;
+    }
+
+    return {
+      cameraRecording: null,
+      customPracticeSettings: config,
+      displayTranscript: buildDisplayTranscript(transcript),
+      durationSeconds: elapsedSeconds,
+      generatedQuestions: questionSet.questions,
+      presence: null,
+      rawTranscript: buildRawTranscript(transcript),
+      scenario,
+      transcript,
+      verbalMetrics: null,
+    };
+  }, [config, elapsedSeconds, questionSet, scenario, transcript]);
+  const payload = useMemo(() => {
+    if (!basePayload) {
+      return null;
+    }
+
+    return {
+      ...basePayload,
+      verbalMetrics: buildVerbalMetricsSummary(basePayload),
+    } satisfies SessionAnalysisPayload;
+  }, [basePayload]);
+  const stageDuration = config
+    ? stage === "prep"
+      ? config.prepTime
+      : config.answerTime
+    : 1;
+  const stageProgress = ((stageDuration - timeLeft) / Math.max(stageDuration, 1)) * 100;
+  const questionProgress =
+    config && questionSet
+      ? ((questionIndex + (stage === "answer" ? 0.5 : 0)) / questionSet.questions.length) *
+        100
+      : 0;
+  const hasPendingSessionExit =
+    !isCompleting &&
+    (captureStarted ||
+      elapsedSeconds > 0 ||
+      questionIndex > 0 ||
+      speechTranscript.transcript.length > 0 ||
+      sessionCamera.isRecording);
+  const { allowNextNavigation } = useSessionExitGuard({
+    enabled: hasPendingSessionExit,
+    message:
+      "Discard this in-progress custom practice session and leave the page? Your current drill progress will not be saved.",
+    onDiscard: async () => {
+      await sessionCamera.finalizeRecording();
+    },
+  });
+
+  useEffect(() => {
+    if (!config || !questionSet || stage === "loading" || isCompleting) {
       return undefined;
     }
 
@@ -60,12 +242,13 @@ export function CustomPracticeSessionPage() {
       if (stage === "prep") {
         setStage("answer");
         setTimeLeft(config.answerTime);
-      } else if (questionIndex + 1 < config.questionCount) {
+        setCaptureStarted(true);
+      } else if (questionIndex + 1 < questionSet.questions.length) {
         setQuestionIndex((value) => value + 1);
         setStage("prep");
         setTimeLeft(config.prepTime);
       } else {
-        setStage("complete");
+        void finalizeSession(true);
       }
 
       return undefined;
@@ -73,119 +256,251 @@ export function CustomPracticeSessionPage() {
 
     const interval = window.setInterval(() => {
       setTimeLeft((value) => value - 1);
+      setElapsedSeconds((value) => value + 1);
     }, 1000);
 
     return () => window.clearInterval(interval);
-  }, [config, questionIndex, stage, timeLeft]);
+  }, [config, isCompleting, questionIndex, questionSet, stage, timeLeft]);
 
-  if (!config || selectedQuestions.length === 0) {
-    return null;
+  async function finalizeSession(navigateToResults: boolean) {
+    if (isCompleting || !config || !scenario || !questionSet || !payload) {
+      return;
+    }
+
+    setIsCompleting(true);
+
+    const finalizedRecording = await sessionCamera.finalizeRecording();
+    let recordingReference: SessionCameraRecording | null =
+      finalizedRecording?.recording ?? null;
+    let presenceFallback = getPresenceFallback(
+      cameraEnabled,
+      sessionCamera.status,
+      finalizedRecording !== null,
+    );
+
+    if (finalizedRecording) {
+      try {
+        await saveSessionCameraRecording(
+          finalizedRecording.recording,
+          finalizedRecording.blob,
+        );
+      } catch (error) {
+        console.warn("[voiceforge] Failed to store custom practice recording:", error);
+      }
+    }
+
+    const finalPayloadBase: SessionAnalysisPayload = {
+      ...payload,
+      cameraRecording: recordingReference,
+      presence:
+        presenceFallback ??
+        getPresenceFallback(cameraEnabled, sessionCamera.status, recordingReference !== null),
+    };
+    const finalPayload: SessionAnalysisPayload = {
+      ...finalPayloadBase,
+      verbalMetrics: buildVerbalMetricsSummary(finalPayloadBase),
+    };
+
+    if (
+      navigateToResults &&
+      (finalPayload.transcript.length > 0 || finalPayload.cameraRecording !== null)
+    ) {
+      const snapshot = createSessionSnapshot(finalPayload, sessionId);
+      saveLastSessionSnapshot(snapshot);
+
+      allowNextNavigation();
+      navigate(`/results?session=${snapshot.id}`);
+      void syncSessionToSupabase({
+        feedback: null,
+        recordingBlob: finalizedRecording?.blob ?? null,
+        snapshot,
+      }).catch((error) => {
+        console.warn(
+          "[voiceforge] Initial custom practice upload failed, results page will retry:",
+          error,
+        );
+      });
+      return;
+    }
+
+    allowNextNavigation();
+    navigate("/practice/custom");
   }
 
-  if (stage === "complete") {
+  if (!config || !questionSet || !currentQuestion || !payload) {
     return (
       <AppShell>
-        <div className="mx-auto max-w-4xl space-y-8">
+        <div className="mx-auto max-w-5xl space-y-8">
           <Panel className="p-10 text-center" elevated>
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-primary">
-              Custom Practice Complete
+            <LoaderCircle className="mx-auto h-6 w-6 animate-spin text-primary" />
+            <p className="mt-4 text-xl font-semibold">Preparing your timed drill</p>
+            <p className="mt-3 text-sm text-muted-foreground">
+              VoiceForge is lining up your prompts and timers.
             </p>
-            <h1 className="mt-4 text-4xl font-semibold tracking-tight">
-              {config.questionCount} prompts completed
-            </h1>
-            <p className="mx-auto mt-4 max-w-2xl text-base leading-7 text-muted-foreground">
-              The structure worked. Keep the next session short and repeat tomorrow
-              while the learning is still fresh.
-            </p>
-            <div className="mt-8 flex flex-wrap justify-center gap-3">
-              <Button to="/practice/custom" variant="secondary">
-                Reconfigure
-              </Button>
-              <Button to="/dashboard">Back to dashboard</Button>
-            </div>
           </Panel>
         </div>
       </AppShell>
     );
   }
 
-  const questionProgress = (questionIndex / config.questionCount) * 100;
-  const stageDuration = stage === "prep" ? config.prepTime : config.answerTime;
-  const stageProgress = ((stageDuration - timeLeft) / stageDuration) * 100;
-
   return (
     <AppShell>
-      <div className="mx-auto max-w-5xl space-y-8">
+      <div className="mx-auto max-w-6xl space-y-8">
         <Panel className="p-6" elevated>
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-primary">
-                Custom practice
+              <div className="flex items-center gap-3">
+                <Button size="icon" to="/practice/custom" variant="secondary">
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-primary">
+                    Custom practice
+                  </p>
+                  <h1 className="mt-2 text-3xl font-semibold">
+                    Question {questionIndex + 1} of {questionSet.questions.length}
+                  </h1>
+                </div>
+              </div>
+              <p className="mt-4 text-sm text-muted-foreground">
+                Work through each prompt, use the prep timer honestly, and move to the
+                next answer when you are ready.
               </p>
-              <h1 className="mt-2 text-3xl font-semibold">
-                Question {questionIndex + 1} of {config.questionCount}
-              </h1>
             </div>
-            <div className="font-mono text-4xl font-semibold">{formatTimer(timeLeft)}</div>
+
+            <div className="flex flex-wrap gap-3">
+              <div className="rounded-2xl border border-border bg-shell px-4 py-3">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
+                  Stage
+                </p>
+                <p className="mt-2 text-lg font-semibold">
+                  {stage === "prep" ? "Prep time" : "Response"}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-border bg-shell px-4 py-3">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
+                  Timer
+                </p>
+                <p className="mt-2 font-mono text-2xl font-semibold">
+                  {formatTimer(timeLeft)}
+                </p>
+              </div>
+            </div>
           </div>
-          <div className="mt-6 space-y-3">
-            <div className="flex items-center justify-between text-sm text-muted-foreground">
-              <span>Session progress</span>
-              <span>{Math.round(questionProgress)}%</span>
+
+          <div className="mt-6 grid gap-4 lg:grid-cols-2">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-sm text-muted-foreground">
+                <span>Session progress</span>
+                <span>{Math.round(questionProgress)}%</span>
+              </div>
+              <ProgressBar value={questionProgress} />
             </div>
-            <ProgressBar value={questionProgress} />
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-sm text-muted-foreground">
+                <span>{stage === "prep" ? "Prep countdown" : "Answer countdown"}</span>
+                <span>{Math.round(stageProgress)}%</span>
+              </div>
+              <ProgressBar value={stageProgress} />
+            </div>
           </div>
         </Panel>
 
-        <Panel className="p-8 sm:p-10" elevated>
-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-primary">
-            {stage === "prep" ? "Preparation phase" : "Response phase"}
-          </p>
-          <h2 className="mt-6 text-3xl font-semibold leading-tight sm:text-4xl">
-            {selectedQuestions[questionIndex]}
-          </h2>
+        <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+          <Panel className="p-8 sm:p-10" elevated>
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-primary">
+              {stage === "prep" ? "Preparation phase" : "Response phase"}
+            </p>
+            <h2 className="mt-6 text-3xl font-semibold leading-tight sm:text-4xl">
+              {currentQuestion.text}
+            </h2>
 
-          <div className="mt-8 space-y-3">
-            <div className="flex items-center justify-between text-sm text-muted-foreground">
-              <span>{stage === "prep" ? "Prep countdown" : "Answer countdown"}</span>
-              <span>{Math.round(stageProgress)}%</span>
+            <div className="mt-8 grid gap-4 sm:grid-cols-3">
+              {[
+                {
+                  label: "Questions",
+                  value: String(config.questionCount),
+                },
+                {
+                  label: "Prep time",
+                  value: formatDuration(config.prepTime),
+                },
+                {
+                  label: "Answer time",
+                  value: formatDuration(config.answerTime),
+                },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-2xl border border-border bg-shell px-4 py-4"
+                >
+                  <p className="mt-3 text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
+                    {item.label}
+                  </p>
+                  <p className="mt-2 text-sm leading-6">{item.value}</p>
+                </div>
+              ))}
             </div>
-            <ProgressBar value={stageProgress} />
-          </div>
 
-          <div className="mt-8 flex flex-wrap gap-3">
-            {stage === "prep" ? (
+            <div className="mt-8 flex flex-wrap gap-3">
+              {stage === "prep" ? (
+                <Button
+                  onClick={() => {
+                    setStage("answer");
+                    setTimeLeft(config.answerTime);
+                    setCaptureStarted(true);
+                  }}
+                >
+                  Start answer
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => {
+                    if (questionIndex + 1 < questionSet.questions.length) {
+                      setQuestionIndex((value) => value + 1);
+                      setStage("prep");
+                      setTimeLeft(config.prepTime);
+                    } else {
+                      void finalizeSession(true);
+                    }
+                  }}
+                >
+                  {questionIndex + 1 < questionSet.questions.length
+                    ? "Next prompt"
+                    : "Finish session"}
+                </Button>
+              )}
+
               <Button
                 onClick={() => {
-                  setStage("answer");
-                  setTimeLeft(config.answerTime);
+                  void finalizeSession(true);
                 }}
+                variant="secondary"
               >
-                Skip to answer
+                End session
               </Button>
-            ) : (
               <Button
-                onClick={() => {
-                  if (questionIndex + 1 < config.questionCount) {
-                    setQuestionIndex((value) => value + 1);
-                    setStage("prep");
-                    setTimeLeft(config.prepTime);
-                  } else {
-                    setStage("complete");
-                  }
-                }}
+                onClick={() => setCameraEnabled((current) => !current)}
+                variant="ghost"
               >
-                Next question
+                {cameraEnabled ? "Camera on" : "Camera off"}
               </Button>
-            )}
-            <Button
-              onClick={() => navigate("/practice/custom")}
-              variant="secondary"
-            >
-              End session
-            </Button>
+            </div>
+          </Panel>
+
+          <div className="space-y-6">
+            <CameraPresencePanel
+              cameraEnabled={cameraEnabled}
+              status={sessionCamera.status}
+              statusMessage={
+                stage === "prep"
+                  ? "Camera preview is ready. Recording and post-session presence analysis begin when the answer stage starts."
+                  : sessionCamera.statusMessage
+              }
+              videoRef={sessionCamera.videoRef}
+            />
           </div>
-        </Panel>
+        </div>
       </div>
     </AppShell>
   );

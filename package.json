@@ -5,13 +5,18 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "vite build",
+    "build:server": "vite build --config vite.server.config.ts",
     "preview": "vite preview",
     "lint": "biome check .",
-    "typecheck": "tsc --project tsconfig.app.json --noEmit"
+    "serve": "node dist-server/index.js",
+    "typecheck": "tsc --project tsconfig.app.json --noEmit && tsc --project tsconfig.node.json --noEmit"
   },
   "dependencies": {
     "@elevenlabs/client": "^0.15.2",
+    "@mediapipe/tasks-vision": "^0.10.33",
+    "@supabase/supabase-js": "^2.99.3",
     "clsx": "^2.1.1",
     "lucide-react": "^0.576.0",
     "react": "^18.3.1",

@@ -11,6 +11,8 @@ lerna-debug.log*
 !.env.example
 node_modules
 dist
+dist-server
+server-dist
 dist-ssr
 output
 *.local
@@ -34,3 +36,9 @@ package-lock.json
 .sync
 history/*.json
 .vite_cache
+tmp_smoke_profile/
+tmp-*.log
+tmp-*.err
+tmp-*.out
+tmp_preview.log
+tmp-preview.out

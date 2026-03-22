@@ -1,3 +1,4 @@
+import { mergePresenceScore } from "../../src/lib/scoring/nonVerbalScore";
 import type {
   FeedbackScores,
   FeedbackSummary,
@@ -6,6 +7,7 @@ import type {
   SessionAnalysisPayload,
   SessionTranscriptEntry,
   TranscriptHighlight,
+  VerbalMetricsSummary,
 } from "./contracts";
 
 type EntrySpeechStats = {
@@ -334,8 +336,12 @@ export function computeSessionStats(
   const pace = roundScore(
     94 - Math.min(paceDistance * 0.55, 42) - Math.max(0, fillerCount - 1) * 1.5,
   );
-  const eyeContactPresence = roundScore(
+  const transcriptDerivedPresence = roundScore(
     60 + clarity * 0.18 + confidence * 0.24 + pace * 0.12 - fillerCount * 1.5,
+  );
+  const eyeContactPresence = mergePresenceScore(
+    transcriptDerivedPresence,
+    payload.presence,
   );
   const fillerWords = roundScore(96 - fillerCount * 9 - fillerRatio * 180);
 
@@ -464,6 +470,23 @@ export function buildDeterministicFeedbackSummary(
   };
 }
 
+export function buildVerbalMetricsSummary(
+  payload: SessionAnalysisPayload,
+): VerbalMetricsSummary {
+  const stats = computeSessionStats(payload);
+
+  return {
+    averageWordsPerUtterance: Math.round(stats.averageWordsPerUtterance * 10) / 10,
+    fillerCount: stats.fillerCount,
+    fillerWordBreakdown: stats.fillerWordBreakdown,
+    hedgeCount: stats.hedgeCount,
+    questionCount: stats.questionCount,
+    scores: stats.scores,
+    totalUserWords: stats.totalUserWords,
+    wordsPerMinute: stats.wordsPerMinute,
+  };
+}
+
 function buildLiveMetrics(stats: SessionComputedStats): LiveMetric[] {
   return [
     {
@@ -503,22 +526,37 @@ export function buildDeterministicLiveMetricsSummary(
 }
 
 export function buildPromptSnapshot(payload: SessionAnalysisPayload) {
-  const stats = computeSessionStats(payload);
+  const verbalMetrics = payload.verbalMetrics ?? buildVerbalMetricsSummary(payload);
+  const sessionStats = computeSessionStats(payload);
   const transcriptExcerpt = payload.transcript
     .slice(-10)
     .map((entry) => `${entry.role.toUpperCase()}: ${entry.text}`)
     .join("\n");
 
   return {
-    averageWordsPerUtterance: Math.round(stats.averageWordsPerUtterance * 10) / 10,
-    durationSeconds: stats.durationSeconds,
-    fillerWordBreakdown: stats.fillerWordBreakdown,
-    highlights: buildHighlights(payload, stats),
-    paceWordsPerMinute: stats.wordsPerMinute,
-    questionCount: stats.questionCount,
+    averageWordsPerUtterance: verbalMetrics.averageWordsPerUtterance,
+    cameraRecording:
+      payload.cameraRecording
+        ? {
+            durationMs: payload.cameraRecording.durationMs,
+            hasAudio: payload.cameraRecording.hasAudio,
+            source: payload.cameraRecording.source,
+          }
+        : null,
+    customPracticeSettings: payload.customPracticeSettings ?? null,
+    durationSeconds: sessionStats.durationSeconds,
+    fillerWordBreakdown: verbalMetrics.fillerWordBreakdown,
+    generatedQuestionCount: payload.generatedQuestions?.length ?? 0,
+    highlights: buildHighlights(payload, sessionStats),
+    paceWordsPerMinute: verbalMetrics.wordsPerMinute,
+    presenceReason: payload.presence?.reason ?? null,
+    presenceScore: payload.presence?.nonVerbalScore ?? null,
+    presenceStatus: payload.presence?.status ?? "unavailable",
+    presenceSummary: payload.presence?.summary ?? null,
+    questionCount: verbalMetrics.questionCount,
     scenario: payload.scenario,
-    scores: stats.scores,
-    totalUserWords: stats.totalUserWords,
+    scores: verbalMetrics.scores,
+    totalUserWords: verbalMetrics.totalUserWords,
     transcriptExcerpt,
   };
 }

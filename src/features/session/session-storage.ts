@@ -1,9 +1,15 @@
+import { createMockPresenceSessionResult } from "@/lib/scoring/nonVerbalScore";
+import { liveTranscriptSeed, type Scenario } from "@/shared/data/mock";
+import type { PresenceSessionResult } from "@/types/presence";
 import { buildDeterministicFeedbackSummary } from "../../../lib/voice-feedback/analysis";
 import type {
+  CustomPracticeSettings,
   FeedbackSummary,
   SessionAnalysisPayload,
+  SessionCameraRecording,
+  SessionQuestionPrompt,
+  VerbalMetricsSummary,
 } from "../../../lib/voice-feedback/contracts";
-import { liveTranscriptSeed, type Scenario } from "@/shared/data/mock";
 
 const LAST_SESSION_STORAGE_KEY = "voiceforge-last-session";
 const SESSION_HISTORY_STORAGE_KEY = "voiceforge-session-history";
@@ -38,8 +44,25 @@ function parseSessionPayload(value: unknown): SessionAnalysisPayload | null {
   }
 
   const durationSeconds = value.durationSeconds;
+  const cameraRecording =
+    "cameraRecording" in value ? parseSessionCameraRecording(value.cameraRecording) : null;
+  const customPracticeSettings =
+    "customPracticeSettings" in value
+      ? parseCustomPracticeSettings(value.customPracticeSettings)
+      : null;
+  const displayTranscript =
+    "displayTranscript" in value ? parseOptionalString(value.displayTranscript) : null;
+  const presence = "presence" in value ? parsePresenceSessionResult(value.presence) : null;
+  const rawTranscript =
+    "rawTranscript" in value ? parseOptionalString(value.rawTranscript) : null;
   const scenario = value.scenario;
   const transcript = value.transcript;
+  const generatedQuestions =
+    "generatedQuestions" in value
+      ? parseGeneratedQuestions(value.generatedQuestions)
+      : null;
+  const verbalMetrics =
+    "verbalMetrics" in value ? parseVerbalMetrics(value.verbalMetrics) : null;
 
   if (
     typeof durationSeconds !== "number" ||
@@ -76,7 +99,13 @@ function parseSessionPayload(value: unknown): SessionAnalysisPayload | null {
     .filter((entry): entry is SessionAnalysisPayload["transcript"][number] => entry !== null);
 
   return {
+    cameraRecording,
+    customPracticeSettings,
+    displayTranscript,
     durationSeconds,
+    generatedQuestions,
+    presence,
+    rawTranscript,
     scenario: {
       description: scenario.description,
       focus: scenario.focus,
@@ -84,6 +113,203 @@ function parseSessionPayload(value: unknown): SessionAnalysisPayload | null {
       title: scenario.title,
     },
     transcript: parsedTranscript,
+    verbalMetrics,
+  };
+}
+
+function parseOptionalString(value: unknown) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return typeof value === "string" ? value : null;
+}
+
+function parseSessionCameraRecording(value: unknown): SessionCameraRecording | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (
+    typeof value.durationMs !== "number" ||
+    typeof value.hasAudio !== "boolean" ||
+    typeof value.height !== "number" ||
+    typeof value.id !== "string" ||
+    typeof value.mimeType !== "string" ||
+    value.source !== "browser_media_recorder" ||
+    typeof value.width !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    durationMs: value.durationMs,
+    hasAudio: value.hasAudio,
+    height: value.height,
+    id: value.id,
+    mimeType: value.mimeType,
+    source: value.source,
+    width: value.width,
+  };
+}
+
+function parsePresenceSessionResult(value: unknown): PresenceSessionResult | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const summary = value.summary;
+  const heuristics = value.heuristics;
+  const reason = value.reason;
+  const validReasons = [
+    "analysis_failed",
+    "camera_denied",
+    "camera_disabled",
+    "camera_error",
+    "camera_unsupported",
+    "model_load_failed",
+    "no_session_frames",
+    "recording_missing",
+  ] as const;
+
+  if (
+    !isRecord(summary) ||
+    !Array.isArray(heuristics) ||
+    !heuristics.every((entry) => typeof entry === "string") ||
+    (value.status !== "ready" && value.status !== "unavailable") ||
+    (reason !== null &&
+      (typeof reason !== "string" ||
+        !validReasons.includes(reason as (typeof validReasons)[number]))) ||
+    (value.nonVerbalScore !== null && typeof value.nonVerbalScore !== "number") ||
+    typeof summary.faceDetectedFrames !== "number" ||
+    typeof summary.facePresencePct !== "number" ||
+    typeof summary.forwardAttentionPct !== "number" ||
+    typeof summary.headStabilityPct !== "number" ||
+    typeof summary.sampledFrames !== "number" ||
+    typeof summary.speakingFrames !== "number" ||
+    typeof summary.speakingMouthActivityPct !== "number"
+  ) {
+    return null;
+  }
+
+  const parsedReason = reason as PresenceSessionResult["reason"];
+
+  return {
+    heuristics,
+    nonVerbalScore: value.nonVerbalScore,
+    reason: parsedReason,
+    status: value.status,
+    summary: {
+      faceDetectedFrames: summary.faceDetectedFrames,
+      facePresencePct: summary.facePresencePct,
+      forwardAttentionPct: summary.forwardAttentionPct,
+      headStabilityPct: summary.headStabilityPct,
+      sampledFrames: summary.sampledFrames,
+      speakingFrames: summary.speakingFrames,
+      speakingMouthActivityPct: summary.speakingMouthActivityPct,
+    },
+  };
+}
+
+function parseCustomPracticeSettings(value: unknown): CustomPracticeSettings | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (
+    typeof value.answerTime !== "number" ||
+    typeof value.audience !== "string" ||
+    typeof value.goal !== "string" ||
+    (value.intensity !== "clarity" &&
+      value.intensity !== "exploratory" &&
+      value.intensity !== "pressure-test") ||
+    typeof value.prepTime !== "number" ||
+    typeof value.questionCount !== "number" ||
+    typeof value.topic !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    answerTime: value.answerTime,
+    audience: value.audience,
+    goal: value.goal,
+    intensity: value.intensity,
+    prepTime: value.prepTime,
+    questionCount: value.questionCount,
+    topic: value.topic,
+  };
+}
+
+function parseGeneratedQuestions(value: unknown): SessionQuestionPrompt[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  return value
+    .map((question) => {
+      if (
+        !isRecord(question) ||
+        typeof question.id !== "string" ||
+        typeof question.text !== "string"
+      ) {
+        return null;
+      }
+
+      return {
+        id: question.id,
+        text: question.text,
+      };
+    })
+    .filter((question): question is SessionQuestionPrompt => question !== null);
+}
+
+function parseVerbalMetrics(value: unknown): VerbalMetricsSummary | null {
+  if (!isRecord(value) || !isRecord(value.scores) || !isRecord(value.fillerWordBreakdown)) {
+    return null;
+  }
+
+  if (
+    typeof value.averageWordsPerUtterance !== "number" ||
+    typeof value.fillerCount !== "number" ||
+    typeof value.hedgeCount !== "number" ||
+    typeof value.questionCount !== "number" ||
+    typeof value.totalUserWords !== "number" ||
+    typeof value.wordsPerMinute !== "number" ||
+    typeof value.scores.clarity !== "number" ||
+    typeof value.scores.confidence !== "number" ||
+    typeof value.scores.eyeContactPresence !== "number" ||
+    typeof value.scores.fillerWords !== "number" ||
+    typeof value.scores.pace !== "number"
+  ) {
+    return null;
+  }
+
+  const fillerWordBreakdown = Object.entries(value.fillerWordBreakdown).reduce<
+    Record<string, number>
+  >((breakdown, [word, count]) => {
+    if (typeof count === "number") {
+      breakdown[word] = count;
+    }
+
+    return breakdown;
+  }, {});
+
+  return {
+    averageWordsPerUtterance: value.averageWordsPerUtterance,
+    fillerCount: value.fillerCount,
+    fillerWordBreakdown,
+    hedgeCount: value.hedgeCount,
+    questionCount: value.questionCount,
+    scores: {
+      clarity: value.scores.clarity,
+      confidence: value.scores.confidence,
+      eyeContactPresence: value.scores.eyeContactPresence,
+      fillerWords: value.scores.fillerWords,
+      pace: value.scores.pace,
+    },
+    totalUserWords: value.totalUserWords,
+    wordsPerMinute: value.wordsPerMinute,
   };
 }
 
@@ -267,7 +493,13 @@ export function createMockSessionPayload(
   const now = Date.now();
 
   return {
+    cameraRecording: null,
+    customPracticeSettings: null,
+    displayTranscript: null,
     durationSeconds: 92,
+    generatedQuestions: null,
+    presence: createMockPresenceSessionResult(),
+    rawTranscript: null,
     scenario: {
       description: scenario.description,
       focus: scenario.focus,
@@ -277,18 +509,20 @@ export function createMockSessionPayload(
     transcript: liveTranscriptSeed.map((entry, index) => ({
       id: `mock-results-${index}`,
       role: entry.role,
-      text: entry.text,
-      timestamp: now + index * 22000,
-    })),
+        text: entry.text,
+        timestamp: now + index * 22000,
+      })),
+    verbalMetrics: null,
   };
 }
 
 export function createSessionSnapshot(
   payload: SessionAnalysisPayload,
+  sessionId = `vf-${Date.now().toString(36)}`,
 ): StoredSessionSnapshot {
   return {
     completedAt: new Date().toISOString(),
-    id: `vf-${Date.now().toString(36)}`,
+    id: sessionId,
     payload,
   };
 }

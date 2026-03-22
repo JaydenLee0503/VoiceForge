@@ -1,6 +1,6 @@
 import { Search } from "lucide-react";
-import { useMemo, useState } from "react";
-
+import { useEffect, useMemo, useState } from "react";
+import { loadSessionHistoryFromSupabase } from "@/lib/supabase/session-store";
 import { AppShell } from "@/shared/layout/app-shell";
 import { PageIntro } from "@/shared/layout/page-intro";
 import { Button } from "@/shared/ui/button";
@@ -11,6 +11,7 @@ import {
   formatSessionDuration,
   loadSessionHistory,
   toSessionHistoryListItem,
+  upsertSessionHistoryEntry,
 } from "../session/session-storage";
 
 function getAverage(values: number[]) {
@@ -23,7 +24,48 @@ function getAverage(values: number[]) {
 
 export function SessionHistoryPage() {
   const [query, setQuery] = useState("");
-  const sessionHistory = useMemo(() => loadSessionHistory(), []);
+  const [sessionHistory, setSessionHistory] = useState(() => loadSessionHistory());
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void loadSessionHistoryFromSupabase().then((remoteEntries) => {
+      if (cancelled || remoteEntries.length === 0) {
+        return;
+      }
+
+      remoteEntries.forEach((entry) => {
+        upsertSessionHistoryEntry(entry);
+      });
+
+      setSessionHistory((currentEntries) => {
+        const nextEntries = [...currentEntries];
+
+        remoteEntries.forEach((entry) => {
+          const existingIndex = nextEntries.findIndex(
+            (candidate) => candidate.id === entry.id,
+          );
+
+          if (existingIndex >= 0) {
+            nextEntries[existingIndex] = entry;
+          } else {
+            nextEntries.push(entry);
+          }
+        });
+
+        return nextEntries.sort(
+          (left, right) =>
+            new Date(right.completedAt).getTime() -
+            new Date(left.completedAt).getTime(),
+        );
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const historyItems = useMemo(
     () => sessionHistory.map((entry) => toSessionHistoryListItem(entry)),
     [sessionHistory],

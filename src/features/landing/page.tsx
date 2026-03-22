@@ -1,4 +1,5 @@
 import { ArrowRight, Play, Radar, Target, Waves } from "lucide-react";
+import { Link } from "react-router-dom";
 
 import { BrandMark } from "@/shared/brand/BrandMark";
 import { landingBenefits, scenarios } from "@/shared/data/mock";
@@ -6,6 +7,13 @@ import { Button } from "@/shared/ui/button";
 import { Panel } from "@/shared/ui/panel";
 
 export function LandingPage() {
+  function scrollToDemoSection() {
+    document.getElementById("landing-demo")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-background text-foreground">
       <div className="pointer-events-none absolute inset-0 bg-app-grid opacity-40" />
@@ -45,7 +53,12 @@ export function LandingPage() {
                 Start practicing
                 <ArrowRight className="h-4 w-4" />
               </Button>
-              <Button className="min-w-44" size="lg" variant="secondary">
+              <Button
+                className="min-w-44"
+                onClick={scrollToDemoSection}
+                size="lg"
+                variant="secondary"
+              >
                 <Play className="h-4 w-4" />
                 See demo
               </Button>
@@ -63,7 +76,11 @@ export function LandingPage() {
             </div>
           </div>
 
-          <Panel className="relative overflow-hidden p-6 sm:p-8" elevated>
+          <Panel
+            className="relative overflow-hidden p-6 sm:p-8"
+            elevated
+            id="landing-demo"
+          >
             <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/70 to-transparent" />
             <div className="space-y-6">
               <div className="flex items-center justify-between">
@@ -96,9 +113,10 @@ export function LandingPage() {
 
                 <div className="grid gap-3">
                   {scenarios.slice(0, 3).map((scenario) => (
-                    <div
+                    <Link
                       key={scenario.id}
-                      className="rounded-2xl border border-border bg-panel-strong/70 p-4"
+                      className="rounded-2xl border border-border bg-panel-strong/70 p-4 transition hover:border-primary/40 hover:bg-panel"
+                      to={`/session/${scenario.id}`}
                     >
                       <div className="flex items-start justify-between gap-4">
                         <div>
@@ -109,7 +127,7 @@ export function LandingPage() {
                         </div>
                         <Target className="mt-1 h-4 w-4 text-primary" />
                       </div>
-                    </div>
+                    </Link>
                   ))}
                 </div>
               </div>

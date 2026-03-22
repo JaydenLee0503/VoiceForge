@@ -1,13 +1,32 @@
+import { lazy } from "react";
 import type { RouteObject } from "react-router-dom";
 
-import { DashboardPage } from "@/features/dashboard/page";
-import { SessionHistoryPage } from "@/features/history/page";
 import { LandingPage } from "@/features/landing/page";
-import { CustomPracticeConfigPage } from "@/features/practice/config-page";
-import { CustomPracticeSessionPage } from "@/features/practice/session-page";
-import { ScenariosPage } from "@/features/scenarios/page";
-import { LiveSessionPage } from "@/features/session/live-session-page";
-import { ResultsPage } from "@/features/session/results-page";
+
+const DashboardPage = lazy(async () => ({
+  default: (await import("@/features/dashboard/page")).DashboardPage,
+}));
+const SessionHistoryPage = lazy(async () => ({
+  default: (await import("@/features/history/page")).SessionHistoryPage,
+}));
+const CustomPracticeConfigPage = lazy(async () => ({
+  default: (await import("@/features/practice/config-page")).CustomPracticeConfigPage,
+}));
+const CustomPracticeSessionPage = lazy(async () => ({
+  default: (await import("@/features/practice/session-page")).CustomPracticeSessionPage,
+}));
+const ScenariosPage = lazy(async () => ({
+  default: (await import("@/features/scenarios/page")).ScenariosPage,
+}));
+const LiveSessionPage = lazy(async () => ({
+  default: (await import("@/features/session/live-session-page")).LiveSessionPage,
+}));
+const MediaPipeSmokePage = lazy(async () => ({
+  default: (await import("@/features/session/mediapipe-smoke-page")).MediaPipeSmokePage,
+}));
+const ResultsPage = lazy(async () => ({
+  default: (await import("@/features/session/results-page")).ResultsPage,
+}));
 
 export const appRoutes: RouteObject[] = [
   {
@@ -29,6 +48,10 @@ export const appRoutes: RouteObject[] = [
   {
     path: "/results",
     element: <ResultsPage />,
+  },
+  {
+    path: "/smoke/mediapipe",
+    element: <MediaPipeSmokePage />,
   },
   {
     path: "/history",

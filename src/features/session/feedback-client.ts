@@ -1,3 +1,4 @@
+import { mergePresenceScore } from "@/lib/scoring/nonVerbalScore";
 import {
   buildDeterministicFeedbackSummary,
   buildDeterministicLiveMetricsSummary,
@@ -44,8 +45,19 @@ export async function requestSessionFeedback(
 ): Promise<FeedbackSummary> {
   const fallback = buildDeterministicFeedbackSummary(payload);
 
+  const applyPresenceScore = (summary: FeedbackSummary): FeedbackSummary => ({
+    ...summary,
+    scores: {
+      ...summary.scores,
+      eyeContactPresence: mergePresenceScore(
+        summary.scores.eyeContactPresence,
+        payload.presence,
+      ),
+    },
+  });
+
   if (!payload.transcript.some((entry) => entry.role === "user")) {
-    return fallback;
+    return applyPresenceScore(fallback);
   }
 
   try {
@@ -54,12 +66,12 @@ export async function requestSessionFeedback(
       payload,
     );
 
-    return response.feedback;
+    return applyPresenceScore(response.feedback);
   } catch {
-    return {
+    return applyPresenceScore({
       ...fallback,
       source: "mock",
-    };
+    });
   }
 }
 
