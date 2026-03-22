@@ -4,9 +4,12 @@ import type { PresenceSessionResult } from "@/types/presence";
 import { buildDeterministicFeedbackSummary } from "../../../lib/voice-feedback/analysis";
 import type {
   CustomPracticeSettings,
+  DebateResult,
+  DebateSettings,
   FeedbackSummary,
   SessionAnalysisPayload,
   SessionCameraRecording,
+  SessionMode,
   SessionQuestionPrompt,
   VerbalMetricsSummary,
 } from "../../../lib/voice-feedback/contracts";
@@ -30,6 +33,7 @@ export type StoredSessionHistoryListItem = {
   date: string;
   duration: string;
   id: string;
+  mode: SessionMode;
   scenario: string;
   scenarioId: string;
 };
@@ -50,6 +54,10 @@ function parseSessionPayload(value: unknown): SessionAnalysisPayload | null {
     "customPracticeSettings" in value
       ? parseCustomPracticeSettings(value.customPracticeSettings)
       : null;
+  const debateResult =
+    "debateResult" in value ? parseDebateResult(value.debateResult) : null;
+  const debateSettings =
+    "debateSettings" in value ? parseDebateSettings(value.debateSettings) : null;
   const displayTranscript =
     "displayTranscript" in value ? parseOptionalString(value.displayTranscript) : null;
   const presence = "presence" in value ? parsePresenceSessionResult(value.presence) : null;
@@ -61,6 +69,7 @@ function parseSessionPayload(value: unknown): SessionAnalysisPayload | null {
     "generatedQuestions" in value
       ? parseGeneratedQuestions(value.generatedQuestions)
       : null;
+  const mode = "mode" in value ? parseSessionMode(value.mode) : null;
   const verbalMetrics =
     "verbalMetrics" in value ? parseVerbalMetrics(value.verbalMetrics) : null;
 
@@ -84,7 +93,7 @@ function parseSessionPayload(value: unknown): SessionAnalysisPayload | null {
         typeof entry.role !== "string" ||
         typeof entry.text !== "string" ||
         typeof entry.timestamp !== "number" ||
-        (entry.role !== "coach" && entry.role !== "user")
+        (entry.role !== "coach" && entry.role !== "opponent" && entry.role !== "user")
       ) {
         return null;
       }
@@ -101,9 +110,12 @@ function parseSessionPayload(value: unknown): SessionAnalysisPayload | null {
   return {
     cameraRecording,
     customPracticeSettings,
+    debateResult,
+    debateSettings,
     displayTranscript,
     durationSeconds,
     generatedQuestions,
+    mode: mode ?? deriveSessionMode(customPracticeSettings, debateSettings),
     presence,
     rawTranscript,
     scenario: {
@@ -241,6 +253,111 @@ function parseCustomPracticeSettings(value: unknown): CustomPracticeSettings | n
   };
 }
 
+function parseSessionMode(value: unknown): SessionMode | null {
+  return value === "custom_practice" || value === "debate" || value === "scenario"
+    ? value
+    : null;
+}
+
+function deriveSessionMode(
+  customPracticeSettings: CustomPracticeSettings | null,
+  debateSettings: DebateSettings | null,
+) {
+  if (debateSettings) {
+    return "debate" satisfies SessionMode;
+  }
+
+  if (customPracticeSettings) {
+    return "custom_practice" satisfies SessionMode;
+  }
+
+  return "scenario" satisfies SessionMode;
+}
+
+function parseDebateRoundPlan(
+  value: unknown,
+): DebateSettings["roundPlan"] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  return value
+    .map((round) => {
+      if (
+        !isRecord(round) ||
+        typeof round.id !== "string" ||
+        typeof round.label !== "string" ||
+        typeof round.order !== "number" ||
+        typeof round.prompt !== "string" ||
+        typeof round.seconds !== "number" ||
+        (round.type !== "opening" && round.type !== "rebuttal" && round.type !== "closing")
+      ) {
+        return null;
+      }
+
+      return {
+        id: round.id,
+        label: round.label,
+        order: round.order,
+        prompt: round.prompt,
+        seconds: round.seconds,
+        type: round.type,
+      };
+    })
+    .filter((round): round is DebateSettings["roundPlan"][number] => round !== null);
+}
+
+function parseDebateSettings(value: unknown): DebateSettings | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const roundPlan = parseDebateRoundPlan(value.roundPlan);
+
+  if (
+    typeof value.assignedStance !== "boolean" ||
+    (value.audienceStyle !== "boardroom" &&
+      value.audienceStyle !== "campus-forum" &&
+      value.audienceStyle !== "public-square") ||
+    (value.difficulty !== "foundation" &&
+      value.difficulty !== "challenger" &&
+      value.difficulty !== "apex") ||
+    (value.judgeStyle !== "balanced" &&
+      value.judgeStyle !== "analytical" &&
+      value.judgeStyle !== "skeptical") ||
+    (value.lengthMinutes !== 1 &&
+      value.lengthMinutes !== 2 &&
+      value.lengthMinutes !== 3 &&
+      value.lengthMinutes !== 4) ||
+    (value.opponentStance !== "affirm" && value.opponentStance !== "oppose") ||
+    typeof value.prepSeconds !== "number" ||
+    (value.roundFormat !== "balanced" &&
+      value.roundFormat !== "rapid-fire" &&
+      value.roundFormat !== "rebuttal-heavy") ||
+    !roundPlan ||
+    typeof value.topic !== "string" ||
+    (value.topicId !== null && typeof value.topicId !== "string") ||
+    (value.userStance !== "affirm" && value.userStance !== "oppose")
+  ) {
+    return null;
+  }
+
+  return {
+    assignedStance: value.assignedStance,
+    audienceStyle: value.audienceStyle,
+    difficulty: value.difficulty,
+    judgeStyle: value.judgeStyle,
+    lengthMinutes: value.lengthMinutes,
+    opponentStance: value.opponentStance,
+    prepSeconds: value.prepSeconds,
+    roundFormat: value.roundFormat,
+    roundPlan,
+    topic: value.topic,
+    topicId: value.topicId,
+    userStance: value.userStance,
+  };
+}
+
 function parseGeneratedQuestions(value: unknown): SessionQuestionPrompt[] | null {
   if (!Array.isArray(value)) {
     return null;
@@ -310,6 +427,124 @@ function parseVerbalMetrics(value: unknown): VerbalMetricsSummary | null {
     },
     totalUserWords: value.totalUserWords,
     wordsPerMinute: value.wordsPerMinute,
+  };
+}
+
+function parseDebateJudgeSummary(value: unknown): DebateResult["judgeSummary"] | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (
+    typeof value.finalVerdict !== "string" ||
+    (value.model !== null && typeof value.model !== "string") ||
+    typeof value.rebuttalQuality !== "string" ||
+    (value.source !== "deterministic" &&
+      value.source !== "groq" &&
+      value.source !== "mock") ||
+    typeof value.strongestArgument !== "string" ||
+    typeof value.suggestedImprovement !== "string" ||
+    typeof value.weakestArgument !== "string" ||
+    (value.winner !== "user" && value.winner !== "opponent" && value.winner !== "draw")
+  ) {
+    return null;
+  }
+
+  return {
+    finalVerdict: value.finalVerdict,
+    model: value.model,
+    rebuttalQuality: value.rebuttalQuality,
+    source: value.source,
+    strongestArgument: value.strongestArgument,
+    suggestedImprovement: value.suggestedImprovement,
+    weakestArgument: value.weakestArgument,
+    winner: value.winner,
+  };
+}
+
+function parseDebateResult(value: unknown): DebateResult | null {
+  if (
+    !isRecord(value) ||
+    !isRecord(value.categoryScores) ||
+    !isRecord(value.rewards) ||
+    !Array.isArray(value.roundScores)
+  ) {
+    return null;
+  }
+
+  const judgeSummary = parseDebateJudgeSummary(value.judgeSummary);
+  const roundScores = value.roundScores
+    .map((round) => {
+      if (
+        !isRecord(round) ||
+        typeof round.label !== "string" ||
+        (round.outcome !== "win" && round.outcome !== "lose" && round.outcome !== "draw") ||
+        typeof round.roundId !== "string" ||
+        typeof round.score !== "number" ||
+        typeof round.summary !== "string"
+      ) {
+        return null;
+      }
+
+      return {
+        label: round.label,
+        outcome: round.outcome,
+        roundId: round.roundId,
+        score: round.score,
+        summary: round.summary,
+      };
+    })
+    .filter((round): round is DebateResult["roundScores"][number] => round !== null);
+
+  if (
+    typeof value.bestMove !== "string" ||
+    typeof value.biggestWeakness !== "string" ||
+    typeof value.categoryScores.argumentStrength !== "number" ||
+    typeof value.categoryScores.clarity !== "number" ||
+    typeof value.categoryScores.confidence !== "number" ||
+    typeof value.categoryScores.pace !== "number" ||
+    typeof value.categoryScores.persuasiveness !== "number" ||
+    typeof value.categoryScores.presence !== "number" ||
+    typeof value.categoryScores.rebuttalQuality !== "number" ||
+    typeof value.categoryScores.structure !== "number" ||
+    typeof value.finalVerdict !== "string" ||
+    !judgeSummary ||
+    typeof value.nextRoundFocus !== "string" ||
+    (value.outcome !== "win" && value.outcome !== "lose" && value.outcome !== "draw") ||
+    (typeof value.rewards.badge !== "string" && value.rewards.badge !== null) ||
+    typeof value.rewards.points !== "number" ||
+    typeof value.rewards.streakBonus !== "number" ||
+    typeof value.totalScore !== "number" ||
+    typeof value.updatedAt !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    bestMove: value.bestMove,
+    biggestWeakness: value.biggestWeakness,
+    categoryScores: {
+      argumentStrength: value.categoryScores.argumentStrength,
+      clarity: value.categoryScores.clarity,
+      confidence: value.categoryScores.confidence,
+      pace: value.categoryScores.pace,
+      persuasiveness: value.categoryScores.persuasiveness,
+      presence: value.categoryScores.presence,
+      rebuttalQuality: value.categoryScores.rebuttalQuality,
+      structure: value.categoryScores.structure,
+    },
+    finalVerdict: value.finalVerdict,
+    judgeSummary,
+    nextRoundFocus: value.nextRoundFocus,
+    outcome: value.outcome,
+    rewards: {
+      badge: value.rewards.badge,
+      points: value.rewards.points,
+      streakBonus: value.rewards.streakBonus,
+    },
+    roundScores,
+    totalScore: value.totalScore,
+    updatedAt: value.updatedAt,
   };
 }
 
@@ -495,9 +730,12 @@ export function createMockSessionPayload(
   return {
     cameraRecording: null,
     customPracticeSettings: null,
+    debateResult: null,
+    debateSettings: null,
     displayTranscript: null,
     durationSeconds: 92,
     generatedQuestions: null,
+    mode: "scenario",
     presence: createMockPresenceSessionResult(),
     rawTranscript: null,
     scenario: {
@@ -630,6 +868,12 @@ export function toSessionHistoryListItem(
     date: formatSessionDate(entry.completedAt),
     duration: formatSessionDuration(entry.payload.durationSeconds),
     id: entry.id,
+    mode:
+      entry.payload.mode ??
+      deriveSessionMode(
+        entry.payload.customPracticeSettings ?? null,
+        entry.payload.debateSettings ?? null,
+      ),
     scenario: entry.payload.scenario.title,
     scenarioId: entry.payload.scenario.id,
   };

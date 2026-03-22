@@ -34,6 +34,7 @@ export type SessionRecord = {
 
 export const navigationItems = [
   { label: "Dashboard", href: "/dashboard" },
+  { label: "Debate Mode", href: "/debate" },
   { label: "Scenarios", href: "/scenarios" },
   { label: "Custom Practice", href: "/practice/custom" },
   { label: "History", href: "/history" },

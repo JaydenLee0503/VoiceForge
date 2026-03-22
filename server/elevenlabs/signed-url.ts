@@ -5,6 +5,7 @@ const ELEVENLABS_SIGNED_URL_PATH = "/api/elevenlabs/signed-url";
 type ElevenLabsServerConfig = {
   apiKey?: string;
   agentId?: string;
+  debateAgentId?: string;
 };
 
 type NextFunction = (error?: unknown) => void;
@@ -25,10 +26,22 @@ function matchesSignedUrlRoute(req: IncomingMessage) {
   return requestUrl.pathname === ELEVENLABS_SIGNED_URL_PATH;
 }
 
+function getRequestedMode(req: IncomingMessage) {
+  if (!req.url) {
+    return "coach" as const;
+  }
+
+  const requestUrl = new URL(req.url, "http://localhost");
+  return requestUrl.searchParams.get("mode") === "debate" ? ("debate" as const) : ("coach" as const);
+}
+
 async function requestSignedUrl({
   agentId,
   apiKey,
-}: Required<ElevenLabsServerConfig>) {
+}: {
+  agentId: string;
+  apiKey: string;
+}) {
   const response = await fetch(
     `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(agentId)}`,
     {
@@ -78,7 +91,11 @@ export function createElevenLabsSignedUrlMiddleware(
       return;
     }
 
-    if (!config.apiKey || !config.agentId) {
+    const requestedMode = getRequestedMode(req);
+    const resolvedAgentId =
+      requestedMode === "debate" ? config.debateAgentId ?? config.agentId : config.agentId;
+
+    if (!config.apiKey || !resolvedAgentId) {
       sendJson(res, 200, {
         mode: "mock",
         reason: "missing_credentials",
@@ -88,7 +105,7 @@ export function createElevenLabsSignedUrlMiddleware(
 
     try {
       const signedUrl = await requestSignedUrl({
-        agentId: config.agentId,
+        agentId: resolvedAgentId,
         apiKey: config.apiKey,
       });
 

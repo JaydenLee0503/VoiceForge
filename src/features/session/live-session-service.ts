@@ -5,14 +5,10 @@ import {
   type Status,
 } from "@elevenlabs/client";
 
-import { liveTranscriptSeed, type Scenario } from "@/shared/data/mock";
+import { liveTranscriptSeed } from "@/shared/data/mock";
+import type { SessionAnalysisScenario, SessionTranscriptRole } from "../../../lib/voice-feedback/contracts";
 
 const SIGNED_URL_ENDPOINT = "/api/elevenlabs/signed-url";
-
-type SessionScenarioContext = Pick<
-  Scenario,
-  "description" | "focus" | "id" | "title"
->;
 
 type SignedUrlResponse =
   | {
@@ -32,7 +28,7 @@ export type LiveSessionTransport = "elevenlabs" | "mock";
 
 export type LiveTranscriptEntry = {
   id: string;
-  role: "coach" | "user";
+  role: SessionTranscriptRole;
   text: string;
   timestamp: number;
 };
@@ -60,24 +56,35 @@ type LiveSessionCallbacks = {
 type StartLiveSessionOptions = {
   callbacks: LiveSessionCallbacks;
   muted: boolean;
-  scenario: SessionScenarioContext;
+  session: LiveSessionConfig;
 };
 
 export type LiveSessionController = {
   end: () => Promise<void>;
   mode: LiveSessionTransport;
+  sendContextualUpdate: (context: string) => Promise<void>;
   setMuted: (muted: boolean) => Promise<void>;
+};
+
+export type LiveSessionConfig = {
+  agentRole?: Extract<SessionTranscriptRole, "coach" | "opponent">;
+  contextualInstructions?: string;
+  mockTranscript?: LiveTranscriptEntry[];
+  persona?: "coach" | "debate";
+  scenario: SessionAnalysisScenario;
+  signedUrlMode?: "coach" | "debate";
 };
 
 function createTranscriptEntry(
   message: ConversationMessagePayload,
+  agentRole: Extract<SessionTranscriptRole, "coach" | "opponent">,
 ): LiveTranscriptEntry {
   return {
     id:
       typeof message.event_id === "number"
         ? `evt-${message.event_id}`
         : `evt-${crypto.randomUUID()}`,
-    role: message.role === "agent" ? "coach" : "user",
+    role: message.role === "agent" ? agentRole : "user",
     text: message.message,
     timestamp: Date.now(),
   };
@@ -91,9 +98,13 @@ function getMockNotice(reason: "endpoint_unavailable" | "missing_credentials") {
   return "The local signed URL endpoint is unavailable. Running the live page in mock mode.";
 }
 
-async function getSignedUrlResponse(): Promise<SignedUrlResponse> {
+async function getSignedUrlResponse(
+  mode: LiveSessionConfig["signedUrlMode"] = "coach",
+): Promise<SignedUrlResponse> {
   try {
-    const response = await fetch(SIGNED_URL_ENDPOINT, {
+    const requestUrl = new URL(SIGNED_URL_ENDPOINT, window.location.origin);
+    requestUrl.searchParams.set("mode", mode);
+    const response = await fetch(requestUrl.toString(), {
       headers: {
         Accept: "application/json",
       },
@@ -166,7 +177,7 @@ async function ensureMicrophoneAccess() {
   }
 }
 
-function buildScenarioContext(scenario: SessionScenarioContext) {
+function buildScenarioContext(scenario: SessionAnalysisScenario) {
   return [
     "VoiceForge scenario selected.",
     `Scenario ID: ${scenario.id}.`,
@@ -177,10 +188,16 @@ function buildScenarioContext(scenario: SessionScenarioContext) {
   ].join(" ");
 }
 
+function buildSessionContext(session: LiveSessionConfig) {
+  return session.contextualInstructions ?? buildScenarioContext(session.scenario);
+}
+
 function startMockSession({
   callbacks,
-}: Omit<StartLiveSessionOptions, "muted" | "scenario">): LiveSessionController {
+  session,
+}: Omit<StartLiveSessionOptions, "muted">): LiveSessionController {
   const conversationId = `mock-${Date.now().toString(36)}`;
+  const mockTranscript = session.mockTranscript ?? liveTranscriptSeed;
   const timeouts = new Set<number>();
   let ended = false;
 
@@ -199,15 +216,15 @@ function startMockSession({
   };
 
   const emitTranscript = (index: number) => {
-    if (ended || index >= liveTranscriptSeed.length) {
+    if (ended || index >= mockTranscript.length) {
       callbacks.onModeChange?.("listening");
       return;
     }
 
-    const entry = liveTranscriptSeed[index];
-    callbacks.onModeChange?.(entry.role === "coach" ? "speaking" : "listening");
+    const entry = mockTranscript[index];
+    callbacks.onModeChange?.(entry.role === "user" ? "listening" : "speaking");
 
-    if (entry.role === "coach") {
+    if (entry.role !== "user") {
       callbacks.onAudioChunk?.();
     }
 
@@ -246,6 +263,7 @@ function startMockSession({
       callbacks.onDisconnect?.({ reason: "user" });
     },
     mode: "mock",
+    sendContextualUpdate: async () => {},
     setMuted: async () => {},
   };
 }
@@ -253,9 +271,9 @@ function startMockSession({
 export async function startLiveSession({
   callbacks,
   muted,
-  scenario,
+  session,
 }: StartLiveSessionOptions): Promise<LiveSessionController> {
-  const signedUrlResponse = await getSignedUrlResponse();
+  const signedUrlResponse = await getSignedUrlResponse(session.signedUrlMode);
 
   if (signedUrlResponse.mode === "mock") {
     callbacks.onResolvedMode?.(
@@ -263,7 +281,7 @@ export async function startLiveSession({
       getMockNotice(signedUrlResponse.reason),
     );
 
-    return startMockSession({ callbacks });
+    return startMockSession({ callbacks, session });
   }
 
   if (signedUrlResponse.mode === "error") {
@@ -272,6 +290,7 @@ export async function startLiveSession({
 
   callbacks.onResolvedMode?.("elevenlabs");
   await ensureMicrophoneAccess();
+  const agentRole = session.agentRole ?? "coach";
 
   const conversation = await Conversation.startSession({
     connectionType: "websocket",
@@ -288,7 +307,7 @@ export async function startLiveSession({
       callbacks.onError?.(message);
     },
     onMessage: (message) => {
-      callbacks.onMessage?.(createTranscriptEntry(message));
+      callbacks.onMessage?.(createTranscriptEntry(message, agentRole));
     },
     onModeChange: ({ mode }) => {
       callbacks.onModeChange?.(mode);
@@ -300,13 +319,16 @@ export async function startLiveSession({
   });
 
   conversation.setMicMuted(muted);
-  conversation.sendContextualUpdate(buildScenarioContext(scenario));
+  conversation.sendContextualUpdate(buildSessionContext(session));
 
   return {
     end: async () => {
       await conversation.endSession();
     },
     mode: "elevenlabs",
+    sendContextualUpdate: async (context) => {
+      conversation.sendContextualUpdate(context);
+    },
     setMuted: async (nextMuted) => {
       conversation.setMicMuted(nextMuted);
     },

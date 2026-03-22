@@ -185,6 +185,7 @@ async function startVoiceForgeServer() {
     createElevenLabsSignedUrlMiddleware({
       agentId: process.env.ELEVENLABS_AGENT_ID,
       apiKey: process.env.ELEVENLABS_API_KEY,
+      debateAgentId: process.env.ELEVENLABS_DEBATE_AGENT_ID,
     }),
     createGroqFeedbackMiddleware({
       apiKey: process.env.GROQ_API_KEY,

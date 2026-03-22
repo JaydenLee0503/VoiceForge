@@ -188,7 +188,12 @@ function buildHighlights(
 
     if (fallbackEntry) {
       highlights.push({
-        label: fallbackEntry.role === "user" ? "Session moment" : "Coach cue",
+        label:
+          fallbackEntry.role === "user"
+            ? "Session moment"
+            : fallbackEntry.role === "opponent"
+              ? "Opponent line"
+              : "Coach cue",
         quote: fallbackEntry.text,
         timestamp: formatTimestamp(payload, fallbackEntry.timestamp),
       });

@@ -1,6 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
+  buildDebatePromptSnapshot,
+  buildDeterministicDebateResult,
+} from "../../lib/debate/analysis";
+import {
   buildDeterministicCustomPracticeQuestions,
 } from "../../lib/practice/question-generation";
 import type {
@@ -13,6 +17,8 @@ import {
   buildPromptSnapshot,
 } from "../../lib/voice-feedback/analysis";
 import type {
+  DebateJudgeResponse,
+  DebateJudgeSummary,
   FeedbackResponse,
   FeedbackSummary,
   LiveMetricsResponse,
@@ -27,6 +33,7 @@ import {
 const LIVE_METRICS_PATH = "/api/groq/live-metrics";
 const SESSION_FEEDBACK_PATH = "/api/groq/session-feedback";
 const CUSTOM_PRACTICE_QUESTIONS_PATH = "/api/groq/custom-practice-questions";
+const DEBATE_JUDGE_PATH = "/api/groq/debate-judge";
 const LIVE_METRICS_PRIMARY_MODEL = "llama-3.1-8b-instant";
 const LIVE_METRICS_SECONDARY_MODEL = "qwen/qwen3-32b";
 const LIVE_METRICS_TERTIARY_MODEL = "llama-3.3-70b-versatile";
@@ -36,6 +43,9 @@ const POST_SESSION_TERTIARY_MODEL = "llama-3.1-8b-instant";
 const CUSTOM_PRACTICE_PRIMARY_MODEL = "openai/gpt-oss-120b";
 const CUSTOM_PRACTICE_SECONDARY_MODEL = "llama-3.3-70b-versatile";
 const CUSTOM_PRACTICE_TERTIARY_MODEL = "qwen/qwen3-32b";
+const DEBATE_JUDGE_PRIMARY_MODEL = "llama-3.3-70b-versatile";
+const DEBATE_JUDGE_SECONDARY_MODEL = "qwen/qwen3-32b";
+const DEBATE_JUDGE_TERTIARY_MODEL = "openai/gpt-oss-120b";
 
 type GroqServerConfig = {
   apiKey?: string;
@@ -61,6 +71,15 @@ type GroqLiveCopy = {
 type GroqPracticeQuestions = {
   intro?: string;
   questions?: string[];
+};
+
+type GroqDebateJudge = {
+  finalVerdict?: string;
+  rebuttalQuality?: string;
+  strongestArgument?: string;
+  suggestedImprovement?: string;
+  weakestArgument?: string;
+  winner?: string;
 };
 
 type GroqFeedbackAnalyst = {
@@ -195,6 +214,24 @@ function toMockLiveMetrics(liveMetrics: LiveMetricsSummary): LiveMetricsResponse
     },
     mode: "mock",
   };
+}
+
+function toMockDebateJudge(judge: DebateJudgeSummary): DebateJudgeResponse {
+  return {
+    judge: {
+      ...judge,
+      source: "mock",
+    },
+    mode: "mock",
+  };
+}
+
+function normalizeJudgeWinner(winner: unknown, fallback: DebateJudgeSummary["winner"]) {
+  if (winner === "user" || winner === "opponent" || winner === "draw") {
+    return winner;
+  }
+
+  return fallback;
 }
 
 async function enrichFeedbackWithGroq(
@@ -429,6 +466,80 @@ async function enrichCustomPracticeQuestionsWithGroq(
   };
 }
 
+async function enrichDebateJudgeWithGroq(
+  apiKeys: string[],
+  payload: SessionAnalysisPayload,
+  fallback: DebateJudgeSummary,
+): Promise<DebateJudgeSummary> {
+  const snapshot = buildDebatePromptSnapshot(payload);
+
+  if (!snapshot) {
+    return fallback;
+  }
+
+  const response = await requestGroqJsonWithFallback<GroqDebateJudge>({
+    apiKeys,
+    maxCompletionTokens: 260,
+    messages: [
+      {
+        content:
+          "You are VoiceForge's debate judge. Return JSON only with keys winner, finalVerdict, strongestArgument, weakestArgument, rebuttalQuality, suggestedImprovement. winner must be one of user, opponent, draw. Keep each field concise, specific, and grounded in the transcript. Do not mention numeric scores.",
+        role: "system",
+      },
+      {
+        content: JSON.stringify(snapshot),
+        role: "user",
+      },
+    ],
+    modelPreferences: [
+      DEBATE_JUDGE_PRIMARY_MODEL,
+      DEBATE_JUDGE_SECONDARY_MODEL,
+      DEBATE_JUDGE_TERTIARY_MODEL,
+    ],
+  });
+
+  return {
+    finalVerdict: normalizeMeaningfulCopy(
+      response.finalVerdict,
+      fallback.finalVerdict,
+      180,
+      7,
+      44,
+    ),
+    model: response.model,
+    rebuttalQuality: normalizeMeaningfulCopy(
+      response.rebuttalQuality,
+      fallback.rebuttalQuality,
+      170,
+      6,
+      38,
+    ),
+    source: "groq",
+    strongestArgument: normalizeMeaningfulCopy(
+      response.strongestArgument,
+      fallback.strongestArgument,
+      170,
+      5,
+      30,
+    ),
+    suggestedImprovement: normalizeMeaningfulCopy(
+      response.suggestedImprovement,
+      fallback.suggestedImprovement,
+      170,
+      6,
+      32,
+    ),
+    weakestArgument: normalizeMeaningfulCopy(
+      response.weakestArgument,
+      fallback.weakestArgument,
+      170,
+      5,
+      30,
+    ),
+    winner: normalizeJudgeWinner(response.winner, fallback.winner),
+  };
+}
+
 async function handleSessionFeedbackRequest(
   config: GroqServerConfig,
   req: IncomingMessage,
@@ -552,6 +663,52 @@ async function handleCustomPracticeQuestionsRequest(
   }
 }
 
+async function handleDebateJudgeRequest(
+  config: GroqServerConfig,
+  req: IncomingMessage,
+  res: ServerResponse,
+) {
+  let payload: SessionAnalysisPayload;
+
+  try {
+    payload = await readJsonBody<SessionAnalysisPayload>(req);
+  } catch (error) {
+    sendJson(res, 400, {
+      message:
+        error instanceof Error ? error.message : "Invalid debate judge request body.",
+      mode: "error",
+    });
+    return;
+  }
+
+  if (!payload.debateSettings) {
+    sendJson(res, 400, {
+      message: "Debate settings are required for judge requests.",
+      mode: "error",
+    });
+    return;
+  }
+
+  const fallback = buildDeterministicDebateResult(payload).judgeSummary;
+  const configuredApiKeys = getConfiguredGroqApiKeys(config);
+
+  if (configuredApiKeys.length === 0) {
+    sendJson(res, 200, toMockDebateJudge(fallback));
+    return;
+  }
+
+  try {
+    const judge = await enrichDebateJudgeWithGroq(configuredApiKeys, payload, fallback);
+    sendJson(res, 200, {
+      judge,
+      mode: "groq",
+    } satisfies DebateJudgeResponse);
+  } catch (error) {
+    console.warn("[voiceforge] Groq debate judge fallback:", error);
+    sendJson(res, 200, toMockDebateJudge(fallback));
+  }
+}
+
 export function createGroqFeedbackMiddleware(config: GroqServerConfig) {
   return async (
     req: IncomingMessage,
@@ -594,6 +751,19 @@ export function createGroqFeedbackMiddleware(config: GroqServerConfig) {
       }
 
       await handleCustomPracticeQuestionsRequest(config, req, res);
+      return;
+    }
+
+    if (matchesRoute(req, DEBATE_JUDGE_PATH)) {
+      if (req.method !== "POST") {
+        sendJson(res, 405, {
+          message: "Method not allowed.",
+          mode: "error",
+        });
+        return;
+      }
+
+      await handleDebateJudgeRequest(config, req, res);
       return;
     }
 

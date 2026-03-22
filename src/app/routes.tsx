@@ -6,6 +6,12 @@ import { LandingPage } from "@/features/landing/page";
 const DashboardPage = lazy(async () => ({
   default: (await import("@/features/dashboard/page")).DashboardPage,
 }));
+const DebateModePage = lazy(async () => ({
+  default: (await import("@/features/debate/page")).DebateModePage,
+}));
+const DebateSessionPage = lazy(async () => ({
+  default: (await import("@/features/debate/session-page")).DebateSessionPage,
+}));
 const SessionHistoryPage = lazy(async () => ({
   default: (await import("@/features/history/page")).SessionHistoryPage,
 }));
@@ -36,6 +42,14 @@ export const appRoutes: RouteObject[] = [
   {
     path: "/dashboard",
     element: <DashboardPage />,
+  },
+  {
+    path: "/debate",
+    element: <DebateModePage />,
+  },
+  {
+    path: "/debate/session",
+    element: <DebateSessionPage />,
   },
   {
     path: "/scenarios",

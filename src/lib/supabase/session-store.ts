@@ -43,7 +43,7 @@ type SupabaseSessionRow = {
   scenario_id: string;
   scenario_title: string;
   session_payload: SessionAnalysisPayload;
-  session_type: "custom_practice" | "scenario";
+  session_type: "custom_practice" | "debate" | "scenario";
   transcript_turns: SessionAnalysisPayload["transcript"];
   updated_at: string;
   user_id: string;
@@ -84,6 +84,10 @@ function parseSessionVideoAssets(value: unknown) {
 }
 
 function getSessionType(payload: SessionAnalysisPayload) {
+  if (payload.mode === "debate" || payload.debateSettings) {
+    return "debate";
+  }
+
   return payload.customPracticeSettings ? "custom_practice" : "scenario";
 }
 
@@ -200,9 +204,12 @@ function toHistoryEntry(row: SupabaseSessionRow): StoredSessionHistoryEntry {
     ({
       cameraRecording: null,
       customPracticeSettings: row.custom_practice_settings ?? null,
+      debateResult: null,
+      debateSettings: null,
       displayTranscript: row.display_transcript,
       durationSeconds: row.duration_seconds,
       generatedQuestions: row.generated_questions ?? null,
+      mode: row.session_type,
       presence: row.presence_summary ?? null,
       rawTranscript: row.raw_transcript,
       scenario: {

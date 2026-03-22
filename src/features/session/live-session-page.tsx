@@ -34,6 +34,7 @@ import { buildDeterministicLiveMetricsSummary } from "../../../lib/voice-feedbac
 import type {
   LiveMetricsSummary,
   SessionAnalysisPayload,
+  SessionAnalysisScenario,
   SessionCameraRecording,
 } from "../../../lib/voice-feedback/contracts";
 
@@ -97,7 +98,7 @@ function getCoachStatusLine(
 }
 
 function buildSessionPayload(
-  scenario: (typeof scenarios)[number],
+  scenario: SessionAnalysisScenario,
   transcript: SessionAnalysisPayload["transcript"],
   durationSeconds: number,
   cameraRecording: SessionCameraRecording | null,
@@ -554,7 +555,9 @@ export function LiveSessionPage() {
               onClick={() => {
                 setSeconds(0);
                 setSessionDraftId(`vf-${Date.now().toString(36)}`);
-                void startSession(scenario);
+                void startSession({
+                  scenario,
+                });
               }}
               size="lg"
             >

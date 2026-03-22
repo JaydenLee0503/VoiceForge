@@ -128,7 +128,7 @@ export function SessionHistoryPage() {
 
         <Panel className="overflow-hidden" elevated>
           <div className="hidden border-b border-border bg-shell px-6 py-4 text-xs uppercase tracking-[0.28em] text-muted-foreground lg:grid lg:grid-cols-[1.3fr_0.8fr_0.8fr_0.8fr_0.8fr_0.6fr]">
-            <span>Scenario</span>
+            <span>Session</span>
             <span>Date</span>
             <span>Duration</span>
             <span>Confidence</span>
@@ -143,7 +143,16 @@ export function SessionHistoryPage() {
                 className="grid gap-4 px-6 py-5 lg:grid-cols-[1.3fr_0.8fr_0.8fr_0.8fr_0.8fr_0.6fr] lg:items-center"
               >
                 <div>
-                  <p className="font-medium">{session.scenario}</p>
+                  <div className="flex items-center gap-3">
+                    <p className="font-medium">{session.scenario}</p>
+                    <span className="rounded-full border border-border bg-shell px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                      {session.mode === "debate"
+                        ? "Debate"
+                        : session.mode === "custom_practice"
+                          ? "Custom"
+                          : "Scenario"}
+                    </span>
+                  </div>
                   <p className="mt-1 text-sm text-muted-foreground lg:hidden">
                     {session.date}
                   </p>
