@@ -217,7 +217,7 @@ export function DashboardPage() {
     ],
     [clarityAverage, confidenceAverage, sessionHistory.length],
   );
-  const recentHistoryItems = historyItems.slice(0, 3);
+  const recentHistoryItems = historyItems.slice(0, 2);
 
   return (
     <AppShell>

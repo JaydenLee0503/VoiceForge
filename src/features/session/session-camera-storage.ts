@@ -93,3 +93,21 @@ export function loadSessionCameraRecording(recordingId: string) {
 export async function removeSessionCameraRecording(recordingId: string) {
   await withStore<undefined>("readwrite", (store) => store.delete(recordingId));
 }
+
+export function clearSessionCameraRecordings() {
+  return new Promise<void>((resolve, reject) => {
+    const request = window.indexedDB.deleteDatabase(CAMERA_DB_NAME);
+
+    request.onerror = () => {
+      reject(request.error ?? new Error("Failed to clear camera recording storage."));
+    };
+
+    request.onblocked = () => {
+      reject(new Error("Camera recording storage clear was blocked."));
+    };
+
+    request.onsuccess = () => {
+      resolve();
+    };
+  });
+}

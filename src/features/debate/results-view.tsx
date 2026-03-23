@@ -18,8 +18,8 @@ type DebateResultsViewProps = {
   analysisRecordingStatus: "idle" | "loading" | "missing" | "ready";
   analysisRecordingUrl: string | null;
   debateResult: DebateResult;
+  debateStatus: "idle" | "loading" | "ready";
   feedback: FeedbackSummary;
-  feedbackStatus: "idle" | "loading" | "ready";
   hasSessionRecording: boolean;
   presenceAnalysisStatus: "analyzing" | "complete" | "idle";
   presenceResult: PresenceSessionResult | null;
@@ -50,12 +50,28 @@ function getVerdictTitle(result: DebateResult) {
   return "Debate drawn";
 }
 
+function getJudgeStatusLabel(source: DebateResult["judgeSummary"]["source"]) {
+  if (source === "llm") {
+    return "Featherless + Groq judge";
+  }
+
+  if (source === "featherless") {
+    return "Featherless judge";
+  }
+
+  if (source === "groq") {
+    return "Groq judge";
+  }
+
+  return "Deterministic judge";
+}
+
 export function DebateResultsView({
   analysisRecordingStatus,
   analysisRecordingUrl,
   debateResult,
+  debateStatus,
   feedback,
-  feedbackStatus,
   hasSessionRecording,
   presenceAnalysisStatus,
   presenceResult,
@@ -81,7 +97,7 @@ export function DebateResultsView({
         }
       />
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2">
         {[
           {
             label: "Verdict",
@@ -90,14 +106,6 @@ export function DebateResultsView({
           {
             label: "Total score",
             value: `${debateResult.totalScore}`,
-          },
-          {
-            label: "Reward points",
-            value: `${debateResult.rewards.points}`,
-          },
-          {
-            label: "Badge",
-            value: debateResult.rewards.badge ?? "No badge",
           },
         ].map((card) => (
           <Panel key={card.label} className="p-5" elevated>
@@ -226,13 +234,15 @@ export function DebateResultsView({
                 <h2 className="mt-2 text-2xl font-semibold">Final verdict</h2>
               </div>
               {(presenceAnalysisStatus === "analyzing" && hasSessionRecording) ||
-              feedbackStatus === "loading" ? (
+              debateStatus === "loading" ? (
                 <div className="rounded-full border border-primary/25 bg-primary/10 px-4 py-2 text-sm text-primary">
-                  {presenceAnalysisStatus === "analyzing" ? "Analyzing presence" : "Refreshing verdict"}
+                  {presenceAnalysisStatus === "analyzing"
+                    ? "Analyzing presence"
+                    : "Syncing judge"}
                 </div>
               ) : (
                 <div className={`rounded-full border px-4 py-2 text-sm ${getOutcomeTone(debateResult.outcome)}`}>
-                  {debateResult.judgeSummary.source === "groq" ? "Judge synced" : "Deterministic judge"}
+                  {getJudgeStatusLabel(debateResult.judgeSummary.source)}
                 </div>
               )}
             </div>
@@ -324,12 +334,10 @@ export function DebateResultsView({
                     <ProgressBar value={Number(value)} />
                   </div>
                 ))
-              ) : (
+              ) : presenceAnalysisStatus === "analyzing" && hasSessionRecording ? null : (
                 <div className="rounded-2xl border border-border bg-shell px-4 py-4">
                   <p className="text-sm text-muted-foreground">
-                    {presenceAnalysisStatus === "analyzing" && hasSessionRecording
-                      ? "MediaPipe is still analyzing the saved debate recording."
-                      : getPresenceAvailabilityMessage(presenceResult?.reason)}
+                    {getPresenceAvailabilityMessage(presenceResult?.reason)}
                   </p>
                 </div>
               )}

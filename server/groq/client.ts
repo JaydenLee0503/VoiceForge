@@ -1,9 +1,13 @@
 const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
+const FEATHERLESS_CHAT_COMPLETIONS_URL = "https://api.featherless.ai/v1/chat/completions";
 
 export const GROQ_PRIMARY_MODEL = "openai/gpt-oss-120b";
 export const GROQ_FALLBACK_MODELS = ["llama-3.1-8b-instant", "qwen/qwen3-32b"] as const;
+export const FEATHERLESS_PRIMARY_MODEL = "Qwen/Qwen2-72B-Instruct";
+export const FEATHERLESS_FALLBACK_MODELS = ["meta-llama/Llama-3.3-70B-Instruct"] as const;
+export type LlmProviderId = "featherless" | "groq";
 
-type GroqChatMessage = {
+type ChatMessage = {
   content: string;
   role: "system" | "user";
 };
@@ -11,7 +15,7 @@ type GroqChatMessage = {
 type GroqChatCompletionBody = {
   include_reasoning?: boolean;
   max_completion_tokens: number;
-  messages: GroqChatMessage[];
+  messages: ChatMessage[];
   model: string;
   reasoning_effort?: "low" | "medium" | "high" | "none";
   response_format: {
@@ -20,21 +24,23 @@ type GroqChatCompletionBody = {
   temperature: number;
 };
 
-type GroqChatCompletionRequest = {
+type ProviderChatCompletionRequest = {
   apiKeys: string[];
   keyOrderOffset?: number;
   maxCompletionTokens: number;
-  messages: GroqChatMessage[];
+  messages: ChatMessage[];
   modelPreferences?: readonly string[];
+  provider: LlmProviderId;
   temperature?: number;
 };
 
-type GroqChatCompletionResult = {
+type ProviderChatCompletionResult = {
   content: string;
   model: string;
+  provider: LlmProviderId;
 };
 
-type GroqApiResponse = {
+type ProviderApiResponse = {
   choices?: Array<{
     message?: {
       content?: string;
@@ -51,13 +57,23 @@ function isQwenReasoningModel(model: string) {
   return model === "qwen/qwen3-32b";
 }
 
-function buildCompletionBody(
-  request: GroqChatCompletionRequest,
+function getProviderLabel(provider: LlmProviderId) {
+  return provider === "groq" ? "Groq" : "Featherless";
+}
+
+function getProviderUrl(provider: LlmProviderId) {
+  return provider === "groq"
+    ? GROQ_CHAT_COMPLETIONS_URL
+    : FEATHERLESS_CHAT_COMPLETIONS_URL;
+}
+
+function buildGroqCompletionBody(
+  request: ProviderChatCompletionRequest,
   model: string,
 ): GroqChatCompletionBody {
   const body: GroqChatCompletionBody = {
     max_completion_tokens: request.maxCompletionTokens,
-    messages: buildModelMessages(request.messages, model),
+    messages: buildModelMessages(request.messages, model, "groq"),
     model,
     response_format: {
       type: "json_object",
@@ -78,10 +94,11 @@ function buildCompletionBody(
 }
 
 function buildModelMessages(
-  messages: GroqChatMessage[],
+  messages: ChatMessage[],
   model: string,
-): GroqChatMessage[] {
-  if (!isGptOssModel(model) && !isQwenReasoningModel(model)) {
+  provider: LlmProviderId,
+): ChatMessage[] {
+  if (provider !== "groq" || (!isGptOssModel(model) && !isQwenReasoningModel(model))) {
     return messages;
   }
 
@@ -101,7 +118,31 @@ function buildModelMessages(
   ];
 }
 
-function parseJsonBlock<T>(content: string) {
+function buildCompletionBody(
+  request: ProviderChatCompletionRequest,
+  model: string,
+) {
+  if (request.provider === "featherless") {
+    return {
+      max_tokens: request.maxCompletionTokens,
+      messages: buildModelMessages(request.messages, model, "featherless"),
+      model,
+      temperature: request.temperature ?? 0.25,
+    };
+  }
+
+  return buildGroqCompletionBody(request, model);
+}
+
+function getDefaultModelPreferences(provider: LlmProviderId) {
+  if (provider === "featherless") {
+    return [FEATHERLESS_PRIMARY_MODEL, ...FEATHERLESS_FALLBACK_MODELS];
+  }
+
+  return [GROQ_PRIMARY_MODEL, ...GROQ_FALLBACK_MODELS];
+}
+
+function parseJsonBlock<T>(content: string, provider: LlmProviderId) {
   try {
     return JSON.parse(content) as T;
   } catch {
@@ -109,7 +150,7 @@ function parseJsonBlock<T>(content: string) {
     const endIndex = content.lastIndexOf("}");
 
     if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
-      throw new Error("Groq response did not contain a valid JSON object.");
+      throw new Error(`${getProviderLabel(provider)} response did not contain a valid JSON object.`);
     }
 
     return JSON.parse(content.slice(startIndex, endIndex + 1)) as T;
@@ -118,10 +159,10 @@ function parseJsonBlock<T>(content: string) {
 
 async function requestModelCompletion(
   apiKey: string,
-  request: GroqChatCompletionRequest,
+  request: ProviderChatCompletionRequest,
   model: string,
-): Promise<GroqChatCompletionResult> {
-  const response = await fetch(GROQ_CHAT_COMPLETIONS_URL, {
+): Promise<ProviderChatCompletionResult> {
+  const response = await fetch(getProviderUrl(request.provider), {
     body: JSON.stringify(buildCompletionBody(request, model)),
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -135,24 +176,30 @@ async function requestModelCompletion(
     const responseBody = await response.text();
     const errorSuffix = responseBody ? `: ${responseBody}` : "";
 
-    throw new Error(`Groq request failed for ${model} with ${response.status}${errorSuffix}`);
+    throw new Error(
+      `${getProviderLabel(request.provider)} request failed for ${model} with ${response.status}${errorSuffix}`,
+    );
   }
 
-  const body = (await response.json()) as GroqApiResponse;
+  const body = (await response.json()) as ProviderApiResponse;
   const content = body.choices?.[0]?.message?.content?.trim();
 
   if (!content) {
     const reasoning = body.choices?.[0]?.message?.reasoning?.trim();
-    const detail = reasoning
+    const detail =
+      request.provider === "groq" && reasoning
       ? " The model returned reasoning without a final content payload."
       : "";
 
-    throw new Error(`Groq response for ${model} did not include message content.${detail}`);
+    throw new Error(
+      `${getProviderLabel(request.provider)} response for ${model} did not include message content.${detail}`,
+    );
   }
 
   return {
     content,
     model,
+    provider: request.provider,
   };
 }
 
@@ -170,15 +217,28 @@ function rotateArray<T>(values: readonly T[], offset = 0) {
 }
 
 export async function requestGroqJsonWithFallback<T>(
-  request: GroqChatCompletionRequest,
+  request: Omit<ProviderChatCompletionRequest, "provider">,
 ): Promise<T & { model: string }> {
+  const response = await requestProviderJsonWithFallback<T>({
+    ...request,
+    provider: "groq",
+  });
+
+  return {
+    ...response,
+    model: response.model,
+  };
+}
+
+export async function requestProviderJsonWithFallback<T>(
+  request: ProviderChatCompletionRequest,
+): Promise<T & { model: string; provider: LlmProviderId }> {
   const errors: string[] = [];
-  const modelPreferences =
-    request.modelPreferences ?? [GROQ_PRIMARY_MODEL, ...GROQ_FALLBACK_MODELS];
+  const modelPreferences = request.modelPreferences ?? getDefaultModelPreferences(request.provider);
   const apiKeys = rotateArray(request.apiKeys, request.keyOrderOffset).filter(Boolean);
 
   if (apiKeys.length === 0) {
-    throw new Error("At least one Groq API key is required.");
+    throw new Error(`At least one ${getProviderLabel(request.provider)} API key is required.`);
   }
 
   for (const model of modelPreferences) {
@@ -187,12 +247,15 @@ export async function requestGroqJsonWithFallback<T>(
         const response = await requestModelCompletion(apiKey, request, model);
 
         return {
-          ...parseJsonBlock<T>(response.content),
+          ...parseJsonBlock<T>(response.content, request.provider),
           model: response.model,
+          provider: response.provider,
         };
       } catch (error) {
         const message =
-          error instanceof Error ? error.message : `Unknown Groq error for ${model}.`;
+          error instanceof Error
+            ? error.message
+            : `Unknown ${getProviderLabel(request.provider)} error for ${model}.`;
 
         errors.push(message);
       }
@@ -200,4 +263,18 @@ export async function requestGroqJsonWithFallback<T>(
   }
 
   throw new Error(errors.join(" | "));
+}
+
+export async function requestFeatherlessJsonWithFallback<T>(
+  request: Omit<ProviderChatCompletionRequest, "provider">,
+): Promise<T & { model: string }> {
+  const response = await requestProviderJsonWithFallback<T>({
+    ...request,
+    provider: "featherless",
+  });
+
+  return {
+    ...response,
+    model: response.model,
+  };
 }

@@ -12,6 +12,7 @@ import type {
 
 type EntrySpeechStats = {
   entry: SessionTranscriptEntry;
+  estimatedTimestamp: number;
   fillerCount: number;
   score: number;
   wordCount: number;
@@ -29,6 +30,13 @@ type SessionComputedStats = {
   totalUserWords: number;
   weakestMoment: EntrySpeechStats | null;
   wordsPerMinute: number;
+};
+
+type ResolvedCustomPracticeTiming = {
+  answerEndTimestamp: number;
+  answerStartTimestamp: number;
+  prompt: NonNullable<SessionAnalysisPayload["generatedQuestions"]>[number];
+  questionIndex: number;
 };
 
 const FILLER_PATTERNS = [
@@ -111,6 +119,14 @@ function countAssertivePhrases(text: string) {
 }
 
 function getDurationSeconds(payload: SessionAnalysisPayload) {
+  const customPracticeSpeakingDurationSeconds = getCustomPracticeSpeakingDurationSeconds(
+    payload,
+  );
+
+  if (customPracticeSpeakingDurationSeconds !== null) {
+    return customPracticeSpeakingDurationSeconds;
+  }
+
   if (payload.durationSeconds > 0) {
     return payload.durationSeconds;
   }
@@ -129,7 +145,10 @@ function getDurationSeconds(payload: SessionAnalysisPayload) {
   return 0;
 }
 
-function buildEntrySpeechStats(entry: SessionTranscriptEntry): EntrySpeechStats {
+function buildEntrySpeechStats(
+  entry: SessionTranscriptEntry,
+  estimatedTimestamp = entry.timestamp,
+): EntrySpeechStats {
   const fillerCount = FILLER_PATTERNS.reduce(
     (total, filler) => total + countPattern(entry.text, filler.pattern),
     0,
@@ -140,6 +159,7 @@ function buildEntrySpeechStats(entry: SessionTranscriptEntry): EntrySpeechStats 
 
   return {
     entry,
+    estimatedTimestamp,
     fillerCount,
     score,
     wordCount,
@@ -147,7 +167,7 @@ function buildEntrySpeechStats(entry: SessionTranscriptEntry): EntrySpeechStats 
 }
 
 function formatTimestamp(payload: SessionAnalysisPayload, timestamp: number) {
-  const sessionStart = payload.transcript[0]?.timestamp ?? timestamp;
+  const sessionStart = getAnalysisStartTimestamp(payload) ?? timestamp;
   const elapsedSeconds = Math.max(
     0,
     Math.round((timestamp - sessionStart) / 1000),
@@ -156,6 +176,154 @@ function formatTimestamp(payload: SessionAnalysisPayload, timestamp: number) {
   const seconds = elapsedSeconds % 60;
 
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function clipSentence(text: string, maxLength = 120) {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+
+  if (cleaned.length <= maxLength) {
+    return cleaned;
+  }
+
+  const trimmed = cleaned.slice(0, maxLength).trim();
+  const lastSpace = trimmed.lastIndexOf(" ");
+
+  return (lastSpace > 40 ? trimmed.slice(0, lastSpace) : trimmed).trim();
+}
+
+function stripTrailingPunctuation(text: string) {
+  return text.replace(/[.!?]+$/g, "").trim();
+}
+
+function findPromptEntryIndex(
+  transcript: SessionTranscriptEntry[],
+  promptId: string,
+  questionIndex: number,
+) {
+  const promptEntryId = `prompt-${promptId}`;
+  const directIndex = transcript.findIndex((entry) => entry.id === promptEntryId);
+
+  if (directIndex >= 0) {
+    return directIndex;
+  }
+
+  let coachEntryCount = -1;
+
+  return transcript.findIndex((entry) => {
+    if (entry.role !== "coach") {
+      return false;
+    }
+
+    coachEntryCount += 1;
+    return coachEntryCount === questionIndex;
+  });
+}
+
+function getRelevantCustomPracticeTimings(payload: SessionAnalysisPayload) {
+  const timeline = payload.customPracticeTimeline;
+  const prompts = payload.generatedQuestions ?? [];
+
+  if (!timeline || prompts.length === 0) {
+    return [] as ResolvedCustomPracticeTiming[];
+  }
+
+  return prompts
+    .map((prompt, questionIndex) => ({
+      prompt,
+      questionIndex,
+      question:
+        timeline.questions.find((question) => question.questionId === prompt.id) ??
+        timeline.questions.find((question) => question.questionIndex === questionIndex) ??
+        null,
+    }))
+    .flatMap((entry) => {
+      const answerStartTimestamp = entry.question?.answerStartTimestamp;
+      const answerEndTimestamp = entry.question?.answerEndTimestamp;
+
+      if (
+        answerStartTimestamp === null ||
+        answerStartTimestamp === undefined ||
+        answerEndTimestamp === null ||
+        answerEndTimestamp === undefined ||
+        answerEndTimestamp <= answerStartTimestamp
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          answerEndTimestamp,
+          answerStartTimestamp,
+          prompt: entry.prompt,
+          questionIndex: entry.questionIndex,
+        } satisfies ResolvedCustomPracticeTiming,
+      ];
+    });
+}
+
+function getAnalysisStartTimestamp(payload: SessionAnalysisPayload) {
+  const customPracticeTimings = getRelevantCustomPracticeTimings(payload);
+
+  if (customPracticeTimings.length > 0) {
+    return Math.min(
+      ...customPracticeTimings.map((entry) => entry.answerStartTimestamp),
+    );
+  }
+
+  return payload.transcript[0]?.timestamp ?? null;
+}
+
+function getCustomPracticeSpeakingDurationSeconds(payload: SessionAnalysisPayload) {
+  const customPracticeTimings = getRelevantCustomPracticeTimings(payload);
+
+  if (customPracticeTimings.length === 0) {
+    return null;
+  }
+
+  const totalDurationMs = customPracticeTimings.reduce(
+    (total, entry) => total + (entry.answerEndTimestamp - entry.answerStartTimestamp),
+    0,
+  );
+
+  return totalDurationMs > 0 ? Math.max(1, Math.round(totalDurationMs / 1000)) : null;
+}
+
+function buildCustomPracticeEntryTimestampMap(payload: SessionAnalysisPayload) {
+  const prompts = payload.generatedQuestions ?? [];
+  const transcript = payload.transcript;
+  const customPracticeTimings = getRelevantCustomPracticeTimings(payload);
+  const entryTimestampMap = new Map<string, number>();
+
+  for (const { answerEndTimestamp, answerStartTimestamp, prompt, questionIndex } of customPracticeTimings) {
+    const startIndex = findPromptEntryIndex(transcript, prompt.id, questionIndex);
+    const nextStartIndex =
+      questionIndex + 1 < prompts.length
+        ? findPromptEntryIndex(transcript, prompts[questionIndex + 1]!.id, questionIndex + 1)
+        : -1;
+    const questionEntries =
+      startIndex >= 0
+        ? transcript.slice(startIndex, nextStartIndex > startIndex ? nextStartIndex : undefined)
+        : transcript;
+    const userEntries = questionEntries.filter(
+      (entry) => entry.role === "user" && entry.text.trim().length > 0,
+    );
+
+    if (userEntries.length === 0) {
+      continue;
+    }
+
+    const windowDurationMs = answerEndTimestamp - answerStartTimestamp;
+
+    userEntries.forEach((entry, entryIndex) => {
+      const relativePosition = (entryIndex + 0.5) / userEntries.length;
+      entryTimestampMap.set(
+        entry.id,
+        answerStartTimestamp + Math.round(windowDurationMs * relativePosition),
+      );
+    });
+  }
+
+  return entryTimestampMap;
 }
 
 function buildHighlights(
@@ -168,7 +336,7 @@ function buildHighlights(
     highlights.push({
       label: "Best moment",
       quote: stats.topMoment.entry.text,
-      timestamp: formatTimestamp(payload, stats.topMoment.entry.timestamp),
+      timestamp: formatTimestamp(payload, stats.topMoment.estimatedTimestamp),
     });
   }
 
@@ -179,7 +347,7 @@ function buildHighlights(
           ? "Tighten this transition"
           : "Sharper finish",
       quote: stats.weakestMoment.entry.text,
-      timestamp: formatTimestamp(payload, stats.weakestMoment.entry.timestamp),
+      timestamp: formatTimestamp(payload, stats.weakestMoment.estimatedTimestamp),
     });
   }
 
@@ -286,6 +454,13 @@ export function computeSessionStats(
   payload: SessionAnalysisPayload,
 ): SessionComputedStats {
   const userEntries = getUserEntries(payload);
+  const customPracticeEntryTimestampMap = buildCustomPracticeEntryTimestampMap(payload);
+  const speechStats = userEntries.map((entry) =>
+    buildEntrySpeechStats(
+      entry,
+      customPracticeEntryTimestampMap.get(entry.id) ?? entry.timestamp,
+    ),
+  );
   const userText = userEntries.map((entry) => entry.text).join(" ");
   const totalUserWords = countWords(userText);
   const fillerWordBreakdown = buildFillerWordBreakdown(userText);
@@ -324,48 +499,51 @@ export function computeSessionStats(
         : 0;
 
   const clarity = roundScore(
-    66 +
-      uniqueRatio * 24 +
-      Math.min(userEntries.length * 3, 10) -
-      fillerRatio * 160 -
+    60 +
+      uniqueRatio * 21 +
+      Math.min(userEntries.length * 2.5, 8) -
+      fillerRatio * 180 -
       sentenceShapePenalty,
   );
   const confidence = roundScore(
-    60 +
-      Math.min(assertiveCount * 2.4, 16) +
-      clamp(averageWordsPerUtterance, 6, 18) * 0.7 -
-      fillerCount * 2.8 -
-      hedgeCount * 2.2 -
-      questionCount * 1.6,
+    54 +
+      Math.min(assertiveCount * 2.2, 15) +
+      clamp(averageWordsPerUtterance, 6, 18) * 0.6 -
+      fillerCount * 3.3 -
+      hedgeCount * 2.7 -
+      questionCount * 2,
   );
   const pace = roundScore(
-    94 - Math.min(paceDistance * 0.55, 42) - Math.max(0, fillerCount - 1) * 1.5,
+    90 - Math.min(paceDistance * 0.62, 44) - Math.max(0, fillerCount - 1) * 2,
   );
   const transcriptDerivedPresence = roundScore(
-    60 + clarity * 0.18 + confidence * 0.24 + pace * 0.12 - fillerCount * 1.5,
+    57 + clarity * 0.16 + confidence * 0.22 + pace * 0.1 - fillerCount * 1.8,
   );
   const eyeContactPresence = mergePresenceScore(
     transcriptDerivedPresence,
     payload.presence,
   );
-  const fillerWords = roundScore(96 - fillerCount * 9 - fillerRatio * 180);
+  const fillerWords = roundScore(
+    92 - fillerCount * 10 - fillerRatio * 190,
+  );
 
-  const scoredEntries = userEntries.map(buildEntrySpeechStats).sort((left, right) => {
+  const scoredEntries = [...speechStats].sort((left, right) => {
     if (right.score === left.score) {
       return right.wordCount - left.wordCount;
     }
 
     return right.score - left.score;
   });
-  const weakestEntry = userEntries
-    .map(buildEntrySpeechStats)
+  const topMoment = scoredEntries[0] ?? null;
+  const weakestEntry = [...speechStats]
     .sort((left, right) => {
       if (right.fillerCount === left.fillerCount) {
         return left.score - right.score;
       }
 
       return right.fillerCount - left.fillerCount;
-    })[0] ?? null;
+    })
+    .find((entry) => entry.entry.id !== topMoment?.entry.id) ?? null;
 
   return {
     averageWordsPerUtterance,
@@ -381,7 +559,7 @@ export function computeSessionStats(
       fillerWords,
       pace,
     },
-    topMoment: scoredEntries[0] ?? null,
+    topMoment,
     totalUserWords,
     weakestMoment: weakestEntry,
     wordsPerMinute,
@@ -416,30 +594,55 @@ function buildBestMoment(
   stats: SessionComputedStats,
 ) {
   if (stats.topMoment) {
-    const quote = stats.topMoment.entry.text;
+    const excerpt = clipSentence(stats.topMoment.entry.text);
+    const timestamp = formatTimestamp(payload, stats.topMoment.estimatedTimestamp);
+    const detail =
+      stats.topMoment.fillerCount === 0
+        ? "The phrasing stayed clean, so the point landed without extra drag."
+        : stats.topMoment.wordCount <= 18
+          ? "It worked because the idea stayed compact enough to follow in one pass."
+          : "It still landed because the explanation stayed specific instead of vague.";
 
-    if (quote.length <= 120) {
-      return `Your strongest stretch was the direct explanation at ${formatTimestamp(payload, stats.topMoment.entry.timestamp)}.`;
+    return `Your strongest moment was around ${timestamp}, when you said "${stripTrailingPunctuation(excerpt)}." ${detail}`;
+  }
+
+  return "Your strongest stretch came when the message stayed direct and specific, which made the main point easier to trust.";
+}
+
+function buildImprovementArea(
+  payload: SessionAnalysisPayload,
+  stats: SessionComputedStats,
+) {
+  if (stats.weakestMoment) {
+    const excerpt = clipSentence(stats.weakestMoment.entry.text);
+    const timestamp = formatTimestamp(payload, stats.weakestMoment.estimatedTimestamp);
+
+    if (stats.weakestMoment.fillerCount >= 2 || stats.fillerCount >= 3) {
+      return `The weakest stretch was around ${timestamp}, when "${stripTrailingPunctuation(excerpt)}" started to lose force through filler-heavy phrasing. Replace that kind of transition with one clean pause so the point sounds intentional instead of improvised.`;
+    }
+
+    if (stats.scores.confidence < 72 || stats.hedgeCount >= 2) {
+      return `The softest stretch was around ${timestamp}, when "${stripTrailingPunctuation(excerpt)}" sounded more qualified than committed. Trim the hedging and land the final clause more firmly so the idea feels defended, not floated.`;
+    }
+
+    if (stats.scores.pace < 72) {
+      return `The message slipped around ${timestamp}, when "${stripTrailingPunctuation(excerpt)}" moved faster than the idea could settle. Leave a short beat after the core claim so the listener can absorb it before you add the next point.`;
     }
   }
 
-  return "Your strongest stretch came when the message stayed direct and uncluttered.";
-}
-
-function buildImprovementArea(stats: SessionComputedStats) {
   if (stats.fillerCount >= 3) {
-    return "Filler words showed up in transitions. Replace one of them with a deliberate pause.";
+    return "Filler words showed up in the transitions often enough to weaken the authority of the point. Replace one of those fillers with a deliberate pause so the delivery feels more controlled.";
   }
 
   if (stats.scores.pace < 72) {
-    return "The pace drifted under pressure. Leave a brief beat after each key point.";
+    return "The pace drifted once the answer picked up speed, so some ideas did not fully land. Leave a brief beat after each key point before moving on.";
   }
 
   if (stats.scores.confidence < 72) {
-    return "Your point softened in a few places. Trim qualifiers and land the last phrase more firmly.";
+    return "Your point softened in a few places because the wording leaned cautious instead of decisive. Trim qualifiers and land the last phrase more firmly so the argument sounds owned.";
   }
 
-  return "Keep the next answer slightly tighter so the main idea lands even faster.";
+  return "The main idea was there, but a few sentences still took too long to get to the point. Tighten the next answer slightly so the strongest claim lands earlier and with more force.";
 }
 
 function buildNextChallenge(
@@ -467,7 +670,7 @@ export function buildDeterministicFeedbackSummary(
     coachSummary: buildCoachSummary(payload, stats),
     fillerWordBreakdown: stats.fillerWordBreakdown,
     highlights: buildHighlights(payload, stats),
-    improvementArea: buildImprovementArea(stats),
+    improvementArea: buildImprovementArea(payload, stats),
     model: null,
     nextChallenge: buildNextChallenge(payload, stats),
     scores: stats.scores,

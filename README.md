@@ -70,7 +70,8 @@ VITE_APP_ID=app-your-local-id
 ELEVENLABS_API_KEY=your_elevenlabs_api_key
 ELEVENLABS_AGENT_ID=your_private_agent_id
 GROQ_API_KEY=your_private_groq_api_key
-GROQ_API_KEYS=key_one,key_two,key_three
+GROQ_API_KEYS=groq_key_one,groq_key_two
+FEATHERLESS_API_KEY=your_private_featherless_api_key
 ```
 
 You still need to configure the ElevenLabs side:
@@ -90,14 +91,16 @@ Local runtime notes:
 
 ## Groq Feedback Setup
 
-VoiceForge now uses local server middleware for Groq-backed coaching copy and live metric guidance.
+VoiceForge now uses local server middleware for LLM-backed coaching copy and live metric guidance.
 
 - `GROQ_API_KEY` must stay server-side only. Do not prefix it with `VITE_`.
 - `GROQ_API_KEYS` is optional and should be a comma-separated server-side list when you want the post-session analysis swarm to distribute work across 2-3 Groq keys.
-- Post-session scoring remains deterministic in code. Groq is only used to generate concise coaching copy for `coachSummary`, `bestMoment`, `improvementArea`, and `nextChallenge`.
-- Post-session feedback now runs as a small server-side swarm of specialist analyzers. Different Groq models review strengths, summary, improvement area, and next challenge independently, then VoiceForge combines the results.
+- `FEATHERLESS_API_KEY` is optional and is currently used by the post-session swarm as an additional provider for next-step coaching copy.
+- Post-session scoring remains deterministic in code. External LLMs are only used to generate concise coaching copy for `coachSummary`, `bestMoment`, `improvementArea`, and `nextChallenge`.
+- Post-session feedback now runs as a small server-side swarm of specialist analyzers. Groq handles the strengths and improvement passes, and Featherless can be added on top for the next-step pass before Groq fallback.
 - Live speaking metric scores remain deterministic in code. Live Groq feedback still uses a single request path to enrich the short live labels and coaching cue, but it now prefers a stable low-latency stack: `llama-3.1-8b-instant`, `qwen/qwen3-32b`, then `llama-3.3-70b-versatile`.
-- The post-session swarm now prefers a stable Llama/Qwen mix: `llama-3.3-70b-versatile`, `qwen/qwen3-32b`, and `llama-3.1-8b-instant`.
+- The Groq side of the post-session swarm prefers a stable Llama/Qwen mix: `llama-3.3-70b-versatile`, `qwen/qwen3-32b`, and `llama-3.1-8b-instant`.
+- The Featherless post-session analyst defaults to `Qwen/Qwen2-72B-Instruct`, then falls back to `meta-llama/Llama-3.3-70B-Instruct`.
 - `openai/gpt-oss-120b` is no longer used for the post-session swarm because its JSON-mode behavior was less reliable for this workflow and caused avoidable fallback retries.
 - If `GROQ_API_KEYS` is present, the post-session swarm rotates across those keys. If only `GROQ_API_KEY` is present, the swarm reuses that single key.
-- If no Groq key is present, the app keeps working with deterministic mock feedback instead of failing.
+- If no external provider key is present, the app keeps working with deterministic mock feedback instead of failing.

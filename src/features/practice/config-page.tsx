@@ -11,6 +11,8 @@ import type { CustomPracticeSettings } from "../../../lib/voice-feedback/contrac
 import {
   DEFAULT_CUSTOM_PRACTICE_SETTINGS,
   loadCustomPracticeSettings,
+  MAX_CUSTOM_PRACTICE_QUESTION_COUNT,
+  MIN_CUSTOM_PRACTICE_QUESTION_COUNT,
   normalizeCustomPracticeSettings,
   saveCustomPracticeSettings,
 } from "./custom-practice-storage";
@@ -71,8 +73,8 @@ export function CustomPracticeConfigPage() {
           <div className="space-y-8">
             <RangeField
               label="Number of questions"
-              max={10}
-              min={3}
+              max={MAX_CUSTOM_PRACTICE_QUESTION_COUNT}
+              min={MIN_CUSTOM_PRACTICE_QUESTION_COUNT}
               onChange={(value) => updateSetting("questionCount", value)}
               value={settings.questionCount}
             />

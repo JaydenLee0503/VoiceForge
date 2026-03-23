@@ -8,8 +8,8 @@ const MIN_ANSWER_TIME = 30;
 const MAX_ANSWER_TIME = 240;
 const MIN_PREP_TIME = 15;
 const MAX_PREP_TIME = 180;
-const MIN_QUESTION_COUNT = 3;
-const MAX_QUESTION_COUNT = 10;
+export const MIN_CUSTOM_PRACTICE_QUESTION_COUNT = 1;
+export const MAX_CUSTOM_PRACTICE_QUESTION_COUNT = 5;
 
 export const DEFAULT_CUSTOM_PRACTICE_SETTINGS: CustomPracticeSettings = {
   answerTime: 120,
@@ -46,8 +46,8 @@ export function normalizeCustomPracticeSettings(
     ),
     questionCount: clamp(
       settings?.questionCount ?? DEFAULT_CUSTOM_PRACTICE_SETTINGS.questionCount,
-      MIN_QUESTION_COUNT,
-      MAX_QUESTION_COUNT,
+      MIN_CUSTOM_PRACTICE_QUESTION_COUNT,
+      MAX_CUSTOM_PRACTICE_QUESTION_COUNT,
     ),
   } satisfies CustomPracticeSettings;
 }

@@ -4,6 +4,7 @@ import type { PresenceSessionResult } from "@/types/presence";
 import { buildDeterministicFeedbackSummary } from "../../../lib/voice-feedback/analysis";
 import type {
   CustomPracticeSettings,
+  CustomPracticeTimeline,
   DebateResult,
   DebateSettings,
   FeedbackSummary,
@@ -53,6 +54,10 @@ function parseSessionPayload(value: unknown): SessionAnalysisPayload | null {
   const customPracticeSettings =
     "customPracticeSettings" in value
       ? parseCustomPracticeSettings(value.customPracticeSettings)
+      : null;
+  const customPracticeTimeline =
+    "customPracticeTimeline" in value
+      ? parseCustomPracticeTimeline(value.customPracticeTimeline)
       : null;
   const debateResult =
     "debateResult" in value ? parseDebateResult(value.debateResult) : null;
@@ -110,6 +115,7 @@ function parseSessionPayload(value: unknown): SessionAnalysisPayload | null {
   return {
     cameraRecording,
     customPracticeSettings,
+    customPracticeTimeline,
     debateResult,
     debateSettings,
     displayTranscript,
@@ -250,6 +256,56 @@ function parseCustomPracticeSettings(value: unknown): CustomPracticeSettings | n
     prepTime: value.prepTime,
     questionCount: value.questionCount,
     topic: value.topic,
+  };
+}
+
+function parseCustomPracticeTimeline(value: unknown): CustomPracticeTimeline | null {
+  if (!isRecord(value) || !Array.isArray(value.questions)) {
+    return null;
+  }
+
+  const recordingStartedAt =
+    value.recordingStartedAt === null
+      ? null
+      : typeof value.recordingStartedAt === "number"
+        ? value.recordingStartedAt
+        : null;
+
+  const questions = value.questions
+    .map((question) => {
+      if (
+        !isRecord(question) ||
+        typeof question.questionId !== "string" ||
+        typeof question.questionIndex !== "number" ||
+        (question.answerStartTimestamp !== null &&
+          typeof question.answerStartTimestamp !== "number") ||
+        (question.answerEndTimestamp !== null &&
+          typeof question.answerEndTimestamp !== "number")
+      ) {
+        return null;
+      }
+
+      return {
+        answerEndTimestamp: question.answerEndTimestamp,
+        answerStartTimestamp: question.answerStartTimestamp,
+        questionId: question.questionId,
+        questionIndex: question.questionIndex,
+      };
+    })
+    .filter(
+      (
+        question,
+      ): question is NonNullable<CustomPracticeTimeline["questions"][number]> =>
+        question !== null,
+    );
+
+  if (questions.length !== value.questions.length) {
+    return null;
+  }
+
+  return {
+    questions,
+    recordingStartedAt,
   };
 }
 
@@ -440,7 +496,9 @@ function parseDebateJudgeSummary(value: unknown): DebateResult["judgeSummary"] |
     (value.model !== null && typeof value.model !== "string") ||
     typeof value.rebuttalQuality !== "string" ||
     (value.source !== "deterministic" &&
+      value.source !== "featherless" &&
       value.source !== "groq" &&
+      value.source !== "llm" &&
       value.source !== "mock") ||
     typeof value.strongestArgument !== "string" ||
     typeof value.suggestedImprovement !== "string" ||
@@ -572,7 +630,9 @@ function parseFeedbackSummary(value: unknown): FeedbackSummary | null {
     !isRecord(fillerWordBreakdown) ||
     (value.model !== null && typeof value.model !== "string") ||
     (value.source !== "deterministic" &&
+      value.source !== "featherless" &&
       value.source !== "groq" &&
+      value.source !== "llm" &&
       value.source !== "mock")
   ) {
     return null;
@@ -827,6 +887,11 @@ export function upsertSessionHistoryEntry(entry: StoredSessionHistoryEntry) {
     SESSION_HISTORY_STORAGE_KEY,
     JSON.stringify(nextEntries),
   );
+}
+
+export function clearSessionHistoryState() {
+  removeStorageValue(LAST_SESSION_STORAGE_KEY);
+  removeStorageValue(SESSION_HISTORY_STORAGE_KEY);
 }
 
 export function buildSessionHistoryEntry(

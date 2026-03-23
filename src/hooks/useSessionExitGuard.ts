@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useBeforeUnload, useBlocker } from "react-router-dom";
+import {
+  isWorkspaceExitNavigationAllowed,
+  registerPendingSessionDiscardHandler,
+} from "@/lib/workspace/exit-workspace";
 
 type UseSessionExitGuardOptions = {
   enabled: boolean;
@@ -24,18 +28,38 @@ export function useSessionExitGuard({
     discardRef.current = onDiscard;
   }, [onDiscard]);
 
+  useEffect(() => {
+    if (!enabled) {
+      return undefined;
+    }
+
+    return registerPendingSessionDiscardHandler(async () => {
+      await discardRef.current?.();
+    });
+  }, [enabled]);
+
   const allowNextNavigation = useCallback(() => {
     allowNavigationRef.current = true;
   }, []);
 
   const blocker = useBlocker(
-    useCallback(() => enabled && !allowNavigationRef.current, [enabled]),
+    useCallback(
+      () =>
+        enabled &&
+        !allowNavigationRef.current &&
+        !isWorkspaceExitNavigationAllowed(),
+      [enabled],
+    ),
   );
 
   useBeforeUnload(
     useCallback(
       (event) => {
-        if (!enabled || allowNavigationRef.current) {
+        if (
+          !enabled ||
+          allowNavigationRef.current ||
+          isWorkspaceExitNavigationAllowed()
+        ) {
           return;
         }
 

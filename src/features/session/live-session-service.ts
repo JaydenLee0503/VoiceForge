@@ -69,6 +69,7 @@ export type LiveSessionController = {
 export type LiveSessionConfig = {
   agentRole?: Extract<SessionTranscriptRole, "coach" | "opponent">;
   contextualInstructions?: string;
+  dynamicVariables?: Record<string, string>;
   mockTranscript?: LiveTranscriptEntry[];
   persona?: "coach" | "debate";
   scenario: SessionAnalysisScenario;
@@ -96,6 +97,14 @@ function getMockNotice(reason: "endpoint_unavailable" | "missing_credentials") {
   }
 
   return "The local signed URL endpoint is unavailable. Running the live page in mock mode.";
+}
+
+function getDebateFallbackError(reason: "endpoint_unavailable" | "missing_credentials") {
+  if (reason === "missing_credentials") {
+    return "Debate mode requires ELEVENLABS_API_KEY and ELEVENLABS_DEBATE_AGENT_ID. Mock fallback is disabled.";
+  }
+
+  return "Debate mode requires the local ElevenLabs signed URL endpoint. Mock fallback is disabled.";
 }
 
 async function getSignedUrlResponse(
@@ -276,6 +285,10 @@ export async function startLiveSession({
   const signedUrlResponse = await getSignedUrlResponse(session.signedUrlMode);
 
   if (signedUrlResponse.mode === "mock") {
+    if (session.signedUrlMode === "debate") {
+      throw new Error(getDebateFallbackError(signedUrlResponse.reason));
+    }
+
     callbacks.onResolvedMode?.(
       "mock",
       getMockNotice(signedUrlResponse.reason),
@@ -294,6 +307,7 @@ export async function startLiveSession({
 
   const conversation = await Conversation.startSession({
     connectionType: "websocket",
+    dynamicVariables: session.dynamicVariables,
     onAudio: () => {
       callbacks.onAudioChunk?.();
     },

@@ -1,4 +1,4 @@
-import { ArrowRight, LoaderCircle, RotateCcw, Trophy } from "lucide-react";
+import { ArrowRight, ChevronDown, RotateCcw, Trophy } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { buildCustomPracticeQuestionReviewSeeds } from "@/features/practice/custom-practice-review";
@@ -18,6 +18,7 @@ import {
 import { scenarios } from "@/shared/data/mock";
 import { AppShell } from "@/shared/layout/app-shell";
 import { PageIntro } from "@/shared/layout/page-intro";
+import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Panel } from "@/shared/ui/panel";
 import { ProgressBar } from "@/shared/ui/progress-bar";
@@ -97,7 +98,7 @@ function getPresenceHeadline(
   hasRecording: boolean,
 ) {
   if (presenceAnalysisStatus === "analyzing" && hasRecording) {
-    return "Analyzing saved camera video";
+    return "Saved session video";
   }
 
   if (presence?.status === "ready" && presence.nonVerbalScore !== null) {
@@ -141,6 +142,10 @@ function buildQuestionReviewSummary(
     promptText: payload.generatedQuestions?.[0]?.text ?? `Question ${questionIndex + 1}`,
     questionIndex,
   };
+}
+
+function formatQuestionReviewCount(count: number) {
+  return `${count} question${count === 1 ? "" : "s"} reviewed`;
 }
 
 async function loadLocalSessionRecordingBlob(recordingId: string) {
@@ -375,6 +380,7 @@ export function ResultsPage() {
   const [questionReviews, setQuestionReviews] = useState<CustomPracticeQuestionReview[]>(
     deterministicQuestionReviews,
   );
+  const [isQuestionReviewExpanded, setIsQuestionReviewExpanded] = useState(false);
   const scoreCards = useMemo(
     () => [
       { label: "Clarity", value: feedback.scores.clarity },
@@ -389,8 +395,8 @@ export function ResultsPage() {
   );
   const insightCards = useMemo(
     () => [
-      { body: feedback.bestMoment, title: "Best moment" },
-      { body: feedback.improvementArea, title: "Improvement area" },
+      { body: feedback.bestMoment, title: "What worked well" },
+      { body: feedback.improvementArea, title: "What to tighten" },
       { body: feedback.nextChallenge, title: "Next challenge" },
     ],
     [feedback],
@@ -444,10 +450,14 @@ export function ResultsPage() {
 
     let cancelled = false;
     setPresenceAnalysisStatus("analyzing");
+    const customPracticeTimeline = snapshotForAnalysis.payload.customPracticeTimeline;
 
     void analyzeSessionRecording(
       analysisRecordingBlob,
       snapshotForAnalysis.payload.transcript,
+      {
+        sessionStartTimestamp: customPracticeTimeline?.recordingStartedAt,
+      },
     )
       .then((presence) => {
         if (cancelled) {
@@ -787,8 +797,8 @@ export function ResultsPage() {
           analysisRecordingStatus={analysisRecordingStatus}
           analysisRecordingUrl={analysisRecordingUrl}
           debateResult={debateResult}
+          debateStatus={debateStatus}
           feedback={feedback}
-          feedbackStatus={feedbackStatus}
           hasSessionRecording={hasSessionRecording}
           presenceAnalysisStatus={presenceAnalysisStatus}
           presenceResult={presenceResult}
@@ -863,43 +873,33 @@ export function ResultsPage() {
 
           <div className="space-y-6">
             <Panel className="p-6" elevated>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-primary">
-                    Eye Contact / Presence
-                  </p>
-                  <h2 className="mt-2 text-2xl font-semibold">
-                    {getPresenceHeadline(
-                      presenceResult,
-                      presenceAnalysisStatus,
-                      hasSessionRecording,
-                    )}
-                  </h2>
-                </div>
-                {(presenceAnalysisStatus === "analyzing" && hasSessionRecording) ||
-                feedbackStatus === "loading" ? (
-                  <div className="rounded-full border border-primary/25 bg-primary/10 px-4 py-2 text-sm text-primary">
-                    {presenceAnalysisStatus === "analyzing"
-                      ? "MediaPipe analyzing video"
-                      : "Refreshing coach feedback"}
-                  </div>
-                ) : (
-                  presenceResult?.status === "ready" &&
-                  presenceResult.nonVerbalScore !== null && (
-                    <div className="rounded-full border border-primary/25 bg-primary/10 px-4 py-2 text-sm text-primary">
-                      Post-session video summary
-                    </div>
-                  )
-                )}
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-primary">
+                  Eye Contact / Presence
+                </p>
+                <h2 className="mt-2 text-2xl font-semibold">
+                  {getPresenceHeadline(
+                    presenceResult,
+                    presenceAnalysisStatus,
+                    hasSessionRecording,
+                  )}
+                </h2>
               </div>
 
-              <p className="mt-4 text-sm text-muted-foreground">
-                {presenceAnalysisStatus === "analyzing"
-                  ? "Playing the saved session video while MediaPipe extracts presence signals and Groq refreshes the coaching feedback."
-                  : formatPresenceCapture(presenceResult)}
-              </p>
+              {presenceAnalysisStatus !== "analyzing" && (
+                <p className="mt-4 text-sm text-muted-foreground">
+                  {formatPresenceCapture(presenceResult)}
+                </p>
+              )}
 
-              <div className="mt-6 grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+              <div
+                className={cn(
+                  "mt-6 grid gap-6",
+                  presenceAnalysisStatus === "analyzing"
+                    ? ""
+                    : "lg:grid-cols-[1.05fr_0.95fr]",
+                )}
+              >
                 <div className="rounded-3xl border border-border bg-shell p-3">
                   {analysisRecordingUrl ? (
                     <video
@@ -916,74 +916,57 @@ export function ResultsPage() {
                         : "The saved session video is unavailable for playback."}
                     </div>
                   )}
-
-                  <div className="mt-3 flex items-center justify-between gap-4 px-1 text-xs uppercase tracking-[0.22em] text-muted-foreground">
-                    <span>Session recording</span>
-                    <span>
-                      {analysisRecordingStatus === "ready"
-                        ? "Ready to review"
-                        : analysisRecordingStatus === "loading"
-                          ? "Loading"
-                          : "Unavailable"}
-                    </span>
-                  </div>
                 </div>
 
-                <div className="space-y-5">
-                  {presenceAnalysisStatus === "analyzing" ? (
-                    <div className="rounded-2xl border border-primary/25 bg-primary/10 px-4 py-4">
-                      <div className="flex items-start gap-3">
-                        <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-primary" />
+                {presenceAnalysisStatus !== "analyzing" && (
+                  <div className="space-y-5">
+                    {presenceResult?.status === "ready" ? (
+                      <>
+                        {[
+                          {
+                            label: "Face presence",
+                            value: presenceResult.summary.facePresencePct,
+                          },
+                          {
+                            label: "Forward attention",
+                            value: presenceResult.summary.forwardAttentionPct,
+                          },
+                          {
+                            label: "Head stability",
+                            value: presenceResult.summary.headStabilityPct,
+                          },
+                          {
+                            label: "Speaking mouth activity",
+                            value: presenceResult.summary.speakingMouthActivityPct,
+                          },
+                        ].map((metric) => (
+                          <div key={metric.label} className="space-y-3">
+                            <div className="flex items-center justify-between text-sm">
+                              <span>{metric.label}</span>
+                              <span className="font-medium">{metric.value}%</span>
+                            </div>
+                            <ProgressBar value={metric.value} />
+                          </div>
+                        ))}
+                      </>
+                    ) : (
+                      <div className="rounded-2xl border border-border bg-shell px-4 py-4">
                         <p className="text-sm text-muted-foreground">
-                          Processing the saved camera recording now. The final Eye Contact /
-                          Presence score and Groq coaching summary will update when analysis completes.
+                          {analysisRecordingStatus === "missing"
+                            ? "The recorded session video could not be loaded for playback or MediaPipe analysis."
+                            : "Presence scoring only runs when a browser camera recording is available."}
                         </p>
                       </div>
-                    </div>
-                  ) : presenceResult?.status === "ready" ? (
-                    <>
-                      {[
-                        {
-                          label: "Face presence",
-                          value: presenceResult.summary.facePresencePct,
-                        },
-                        {
-                          label: "Forward attention",
-                          value: presenceResult.summary.forwardAttentionPct,
-                        },
-                        {
-                          label: "Head stability",
-                          value: presenceResult.summary.headStabilityPct,
-                        },
-                        {
-                          label: "Speaking mouth activity",
-                          value: presenceResult.summary.speakingMouthActivityPct,
-                        },
-                      ].map((metric) => (
-                        <div key={metric.label} className="space-y-3">
-                          <div className="flex items-center justify-between text-sm">
-                            <span>{metric.label}</span>
-                            <span className="font-medium">{metric.value}%</span>
-                          </div>
-                          <ProgressBar value={metric.value} />
-                        </div>
-                      ))}
-                    </>
-                  ) : (
-                    <div className="rounded-2xl border border-border bg-shell px-4 py-4">
-                      <p className="text-sm text-muted-foreground">
-                        {analysisRecordingStatus === "missing"
-                          ? "The recorded session video could not be loaded for playback or MediaPipe analysis."
-                          : "Presence scoring only runs when a browser camera recording is available."}
-                      </p>
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
+                )}
               </div>
 
-              <p className="mt-6 text-sm text-muted-foreground">
-                {NON_VERBAL_HEURISTIC_NOTE} {NON_VERBAL_WEIGHT_NOTE}
-              </p>
+              {presenceAnalysisStatus !== "analyzing" && (
+                <p className="mt-6 text-sm text-muted-foreground">
+                  {NON_VERBAL_HEURISTIC_NOTE} {NON_VERBAL_WEIGHT_NOTE}
+                </p>
+              )}
             </Panel>
 
             <Panel className="p-6" elevated>
@@ -1021,113 +1004,137 @@ export function ResultsPage() {
         </div>
 
         {isCustomPractice && questionReviews.length > 0 && (
-          <div className="space-y-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-primary">
-                  Question Review
-                </p>
-                <h2 className="mt-2 text-2xl font-semibold">
-                  Feedback for each answer
-                </h2>
-              </div>
-              <div className="rounded-full border border-border bg-shell px-4 py-2 text-sm text-muted-foreground">
-                {questionReviewStatus === "loading"
-                  ? "Building question-by-question feedback"
-                  : `${questionReviews.length} questions reviewed`}
-              </div>
-            </div>
-
-            {questionReviews.map((review) => (
-              <Panel
-                key={`${review.questionIndex}-${review.promptText}`}
-                className="p-6"
-                elevated
-              >
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.28em] text-primary">
-                      Question {review.questionIndex + 1}
-                    </p>
-                    <h3 className="mt-2 text-2xl font-semibold leading-tight">
-                      {review.promptText}
-                    </h3>
-                  </div>
-                  <div className="rounded-full border border-primary/25 bg-primary/10 px-4 py-2 text-sm text-primary">
-                    {review.presence?.status === "ready" &&
-                    review.presence.nonVerbalScore !== null
-                      ? `${review.presence.nonVerbalScore}% camera presence`
-                      : "Camera score unavailable"}
-                  </div>
+          <Panel className="p-5 sm:p-6" elevated>
+            <button
+              className="w-full text-left"
+              onClick={() => setIsQuestionReviewExpanded((current) => !current)}
+              type="button"
+            >
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-primary">
+                    Question Review
+                  </p>
+                  <h2 className="mt-2 text-2xl font-semibold">
+                    Feedback for each answer
+                  </h2>
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    Open the per-answer breakdown when you want the detailed drill review.
+                  </p>
                 </div>
 
-                <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  {[
-                    { label: "Clarity", value: review.feedback.scores.clarity },
-                    { label: "Confidence", value: review.feedback.scores.confidence },
-                    { label: "Pace", value: review.feedback.scores.pace },
-                    {
-                      label: "Eye Contact / Presence",
-                      value: review.feedback.scores.eyeContactPresence,
-                    },
-                  ].map((score) => (
-                    <div
-                      key={score.label}
-                      className="rounded-2xl border border-border bg-shell px-4 py-4"
-                    >
-                      <div className="flex items-center justify-between gap-4">
-                        <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
-                          {score.label}
+                <div className="flex items-center gap-3 self-start lg:self-center">
+                  <div className="rounded-full border border-border bg-shell px-4 py-2 text-sm text-muted-foreground">
+                    {questionReviewStatus === "loading"
+                      ? "Building question-by-question feedback"
+                      : formatQuestionReviewCount(questionReviews.length)}
+                  </div>
+                  <div className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-shell text-muted-foreground">
+                    <ChevronDown
+                      className={cn(
+                        "h-5 w-5 transition-transform duration-200",
+                        isQuestionReviewExpanded && "rotate-180",
+                      )}
+                    />
+                  </div>
+                </div>
+              </div>
+            </button>
+
+            {isQuestionReviewExpanded && (
+              <div className="mt-6 space-y-4">
+                {questionReviews.map((review) => (
+                  <Panel
+                    key={`${review.questionIndex}-${review.promptText}`}
+                    className="p-6"
+                    elevated
+                  >
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-primary">
+                          Question {review.questionIndex + 1}
                         </p>
-                        <span className="text-sm font-medium">{score.value}%</span>
+                        <h3 className="mt-2 text-2xl font-semibold leading-tight">
+                          {review.promptText}
+                        </h3>
                       </div>
-                      <div className="mt-4">
-                        <ProgressBar value={score.value} />
+                      <div className="rounded-full border border-primary/25 bg-primary/10 px-4 py-2 text-sm text-primary">
+                        {review.presence?.status === "ready" &&
+                        review.presence.nonVerbalScore !== null
+                          ? `${review.presence.nonVerbalScore}% camera presence`
+                          : "Camera score unavailable"}
                       </div>
                     </div>
-                  ))}
-                </div>
 
-                <div className="mt-6 grid gap-4 lg:grid-cols-3">
-                  {[
-                    {
-                      body: review.feedback.bestMoment,
-                      title: "Best moment",
-                    },
-                    {
-                      body: review.feedback.improvementArea,
-                      title: "Improvement area",
-                    },
-                    {
-                      body: review.feedback.nextChallenge,
-                      title: "Next challenge",
-                    },
-                  ].map((item) => (
-                    <div
-                      key={item.title}
-                      className="rounded-2xl border border-border bg-shell px-4 py-4"
-                    >
+                    <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                      {[
+                        { label: "Clarity", value: review.feedback.scores.clarity },
+                        { label: "Confidence", value: review.feedback.scores.confidence },
+                        { label: "Pace", value: review.feedback.scores.pace },
+                        {
+                          label: "Eye Contact / Presence",
+                          value: review.feedback.scores.eyeContactPresence,
+                        },
+                      ].map((score) => (
+                        <div
+                          key={score.label}
+                          className="rounded-2xl border border-border bg-shell px-4 py-4"
+                        >
+                          <div className="flex items-center justify-between gap-4">
+                            <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
+                              {score.label}
+                            </p>
+                            <span className="text-sm font-medium">{score.value}%</span>
+                          </div>
+                          <div className="mt-4">
+                            <ProgressBar value={score.value} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-6 grid gap-4 lg:grid-cols-3">
+                      {[
+                        {
+                          body: review.feedback.bestMoment,
+                          title: "What worked well",
+                        },
+                        {
+                          body: review.feedback.improvementArea,
+                          title: "What to tighten",
+                        },
+                        {
+                          body: review.feedback.nextChallenge,
+                          title: "Next challenge",
+                        },
+                      ].map((item) => (
+                        <div
+                          key={item.title}
+                          className="rounded-2xl border border-border bg-shell px-4 py-4"
+                        >
+                          <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
+                            {item.title}
+                          </p>
+                          <p className="mt-3 text-sm leading-7 text-foreground">
+                            {item.body}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-6 rounded-2xl border border-border bg-shell px-4 py-4">
                       <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
-                        {item.title}
+                        Your answer
                       </p>
                       <p className="mt-3 text-sm leading-7 text-foreground">
-                        {item.body}
+                        {review.answerText || "No spoken response was captured for this prompt."}
                       </p>
                     </div>
-                  ))}
-                </div>
-
-                <div className="mt-6 rounded-2xl border border-border bg-shell px-4 py-4">
-                  <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
-                    Your answer
-                  </p>
-                  <p className="mt-3 text-sm leading-7 text-foreground">
-                    {review.answerText || "No spoken response was captured for this prompt."}
-                  </p>
-                </div>
-              </Panel>
-            ))}
-          </div>
+                  </Panel>
+                ))}
+              </div>
+            )}
+          </Panel>
         )}
       </div>
     </AppShell>

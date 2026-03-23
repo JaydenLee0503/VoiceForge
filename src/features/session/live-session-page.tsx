@@ -9,7 +9,6 @@ import {
   PhoneOff,
   Play,
   Radio,
-  Sparkles,
   Target,
   TriangleAlert,
 } from "lucide-react";
@@ -27,6 +26,7 @@ import { syncSessionToSupabase } from "@/lib/supabase/session-store";
 import { scenarios } from "@/shared/data/mock";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { OrbAvatar } from "@/shared/ui/orb-avatar";
 import { Panel } from "@/shared/ui/panel";
 import { ProgressBar } from "@/shared/ui/progress-bar";
 import type { PresenceSessionResult } from "@/types/presence";
@@ -188,7 +188,6 @@ export function LiveSessionPage() {
   const [isFinalizingSession, setIsFinalizingSession] = useState(false);
   const [sessionDraftId, setSessionDraftId] = useState<string | null>(null);
   const [seconds, setSeconds] = useState(0);
-  const transcriptAnchor = useRef<HTMLDivElement | null>(null);
   const secondsRef = useRef(0);
   const {
     disconnectMessage,
@@ -246,10 +245,6 @@ export function LiveSessionPage() {
 
     return () => window.clearInterval(interval);
   }, [isConnected]);
-
-  useEffect(() => {
-    transcriptAnchor.current?.scrollIntoView({ behavior: "smooth" });
-  }, [transcript]);
 
   useEffect(() => {
     setLiveMetricsSummary((current) => mergeLiveMetrics(deterministicLiveMetrics, current));
@@ -359,35 +354,54 @@ export function LiveSessionPage() {
           </div>
         </header>
 
-        <div className="grid flex-1 gap-6 py-6 xl:grid-cols-[1.2fr_0.8fr]">
-          <div className="space-y-6">
+        <div className="grid min-h-0 flex-1 gap-6 py-6 xl:grid-cols-[1.2fr_0.8fr]">
+          <div className="flex min-h-0 flex-col gap-6">
             <Panel className="p-6" elevated>
-              <div className="flex items-center justify-between gap-6">
-                <div className="flex items-center gap-4">
-                  <span className="relative flex h-14 w-14 items-center justify-center rounded-full border border-primary/30 bg-primary/10">
-                    <Sparkles className="h-6 w-6 text-primary" />
-                    {isConnected && (
-                      <span className="absolute inset-0 rounded-full border border-primary/50 animate-ping" />
-                    )}
-                  </span>
-                  <div>
-                    <p className="text-sm text-muted-foreground">AI coach</p>
-                    <h2 className="text-2xl font-semibold">Alex</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {getCoachStatusLine(speakerMode, sessionStatus)}
-                    </p>
+              <div className="space-y-2">
+                <div className="max-w-[240px] text-left">
+                  <p className="text-sm text-muted-foreground">AI coach</p>
+                  <h2 className="text-2xl font-semibold">Alex</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {getCoachStatusLine(speakerMode, sessionStatus)}
+                  </p>
+                </div>
+                <div className="-mt-40 flex justify-center sm:-mt-64">
+                  <div className="scale-[1.45] sm:scale-[1.65]">
+                    <OrbAvatar
+                      active={isConnected}
+                      speaking={isConnected && speakerMode === "speaking"}
+                      className="h-40 w-40"
+                    />
                   </div>
                 </div>
-                <div className="space-y-2 text-right text-sm text-muted-foreground">
-                  <p>Focus</p>
-                  <p className="font-medium text-foreground">{scenario.focus}</p>
-                  <p>{getConnectionLabel(mode, sessionStatus)}</p>
-                  <p>{hasAudioStream ? "Audio stream active" : "Audio standby"}</p>
+                <div className="grid w-full gap-3 text-sm sm:grid-cols-3">
+                  <div className="rounded-2xl border border-border bg-shell px-4 py-4">
+                    <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
+                      Focus
+                    </p>
+                    <p className="mt-2 font-medium text-foreground">{scenario.focus}</p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-shell px-4 py-4">
+                    <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
+                      Connection
+                    </p>
+                    <p className="mt-2 font-medium text-foreground">
+                      {getConnectionLabel(mode, sessionStatus)}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-border bg-shell px-4 py-4">
+                    <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
+                      Audio
+                    </p>
+                    <p className="mt-2 font-medium text-foreground">
+                      {hasAudioStream ? "Audio stream active" : "Audio standby"}
+                    </p>
+                  </div>
                 </div>
               </div>
             </Panel>
 
-            <Panel className="flex min-h-[480px] flex-col p-6" elevated>
+            <Panel className="flex min-h-0 flex-1 flex-col p-6" elevated>
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.28em] text-primary">
@@ -420,7 +434,7 @@ export function LiveSessionPage() {
                 </div>
               )}
 
-              <div className="mt-6 flex-1 space-y-4 overflow-y-auto pr-2">
+              <div className="mt-6 min-h-0 flex-1 space-y-4 overflow-y-auto pr-2">
                 {transcript.length === 0 && (
                   <div className="flex h-full items-center justify-center rounded-3xl border border-dashed border-border bg-shell text-center">
                     <div className="space-y-2 p-8">
@@ -461,7 +475,6 @@ export function LiveSessionPage() {
                     </div>
                   </div>
                 ))}
-                <div ref={transcriptAnchor} />
               </div>
             </Panel>
           </div>

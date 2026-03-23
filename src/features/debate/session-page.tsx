@@ -1,5 +1,4 @@
 import {
-  Activity,
   Camera,
   CameraOff,
   ChevronLeft,
@@ -8,10 +7,6 @@ import {
   MicOff,
   PhoneOff,
   Radio,
-  Scale,
-  Shield,
-  Sparkles,
-  Swords,
   TriangleAlert,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -27,6 +22,7 @@ import { createUnavailablePresenceResult } from "@/lib/scoring/nonVerbalScore";
 import { syncSessionToSupabase } from "@/lib/supabase/session-store";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { OrbAvatar } from "@/shared/ui/orb-avatar";
 import { Panel } from "@/shared/ui/panel";
 import { ProgressBar } from "@/shared/ui/progress-bar";
 import type { PresenceSessionResult } from "@/types/presence";
@@ -47,7 +43,6 @@ import {
   buildDebateScenario,
   getDebateDifficultyLabel,
   getDebateDifficultyProfile,
-  getDebateJudgeLabel,
   getDebateStanceLabel,
   loadDebateSettings,
 } from "./config";
@@ -75,29 +70,6 @@ function formatTimer(totalSeconds: number) {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-function getConnectionLabel(
-  mode: "elevenlabs" | "mock" | null,
-  sessionStatus: LivePageStatus,
-) {
-  if (sessionStatus === "connecting") {
-    return "Connecting";
-  }
-
-  if (sessionStatus === "disconnecting") {
-    return "Ending";
-  }
-
-  if (sessionStatus === "disconnected") {
-    return "Disconnected";
-  }
-
-  if (sessionStatus !== "connected") {
-    return "Standby";
-  }
-
-  return mode === "mock" ? "Mock arena" : "ElevenLabs live";
-}
-
 function getOpponentStatusLine(
   speakerMode: "listening" | "speaking",
   sessionStatus: LivePageStatus,
@@ -117,37 +89,6 @@ function getOpponentStatusLine(
   return speakerMode === "speaking"
     ? "Pressuring the motion in real time"
     : "Listening for the next opening";
-}
-
-function buildDebateMockTranscript(settings: DebateSettings) {
-  const now = Date.now();
-
-  return [
-    {
-      id: "debate-mock-0",
-      role: "opponent" as const,
-      text: `I ${settings.opponentStance === "affirm" ? "affirm" : "oppose"} the motion. The other side confuses convenience with long-term value.`,
-      timestamp: now,
-    },
-    {
-      id: "debate-mock-1",
-      role: "user" as const,
-      text: `I ${settings.userStance === "affirm" ? "affirm" : "oppose"} it because the system already rewards output over reasoning.`,
-      timestamp: now + 1200,
-    },
-    {
-      id: "debate-mock-2",
-      role: "opponent" as const,
-      text: "That skips the real tradeoff. Speed without judgment just scales weaker thinking faster.",
-      timestamp: now + 2600,
-    },
-    {
-      id: "debate-mock-3",
-      role: "user" as const,
-      text: "Only if the system stays passive. Guided use can shift work toward defense, synthesis, and oral reasoning.",
-      timestamp: now + 4200,
-    },
-  ];
 }
 
 function buildSessionPayload(
@@ -264,8 +205,6 @@ export function DebateSessionPage() {
     disconnectMessage,
     endSession,
     error,
-    hasAudioStream,
-    mode,
     muted,
     notice,
     sendContextualUpdate,
@@ -316,7 +255,11 @@ export function DebateSessionPage() {
       void startSession({
         agentRole: "opponent",
         contextualInstructions: buildDebateSessionContext(settings, settings.roundPlan[0]),
-        mockTranscript: buildDebateMockTranscript(settings),
+        dynamicVariables: {
+          ai_stance: getDebateStanceLabel(settings.opponentStance).toLowerCase(),
+          topic: settings.topic,
+          user_stance: getDebateStanceLabel(settings.userStance).toLowerCase(),
+        },
         persona: "debate",
         scenario: buildDebateScenario(settings),
         signedUrlMode: "debate",
@@ -535,7 +478,7 @@ export function DebateSessionPage() {
               {isConnected && (
                 <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-sm text-emerald-300">
                   <Radio className="h-4 w-4 animate-pulse" />
-                  {mode === "mock" ? "Mock live" : "Live"}
+                  Live
                 </span>
               )}
             </div>
@@ -545,61 +488,22 @@ export function DebateSessionPage() {
         <div className="grid flex-1 gap-6 py-6 xl:grid-cols-[1.2fr_0.8fr]">
           <div className="space-y-6">
             <Panel className="p-6" elevated>
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-                <div className="flex items-start gap-4">
-                  <span className="relative flex h-14 w-14 items-center justify-center rounded-full border border-primary/30 bg-primary/10">
-                    <Swords className="h-6 w-6 text-primary" />
-                    {isConnected && (
-                      <span className="absolute inset-0 animate-ping rounded-full border border-primary/50" />
-                    )}
-                  </span>
-                  <div>
-                    <p className="text-sm text-muted-foreground">AI opponent</p>
-                    <h2 className="text-2xl font-semibold">
-                      {getDebateDifficultyLabel(settings.difficulty)} Pressure
-                    </h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {getOpponentStatusLine(speakerMode, sessionStatus)}
-                    </p>
-                  </div>
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+                <div className="max-w-xl">
+                  <p className="text-sm text-muted-foreground">AI opponent</p>
+                  <h2 className="text-2xl font-semibold">
+                    {getDebateDifficultyLabel(settings.difficulty)} Pressure
+                  </h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {getOpponentStatusLine(speakerMode, sessionStatus)}
+                  </p>
                 </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {[
-                    {
-                      icon: Shield,
-                      label: "Judge",
-                      value: getDebateJudgeLabel(settings.judgeStyle),
-                    },
-                    {
-                      icon: Scale,
-                      label: "Transport",
-                      value: getConnectionLabel(mode, sessionStatus),
-                    },
-                    {
-                      icon: Sparkles,
-                      label: "Pressure",
-                      value: difficultyProfile
-                        ? `${difficultyProfile.aggressiveness}, ${difficultyProfile.rebuttalSharpness}`
-                        : "Configuring",
-                    },
-                    {
-                      icon: Activity,
-                      label: "Audio",
-                      value: hasAudioStream ? "Active" : "Standby",
-                    },
-                  ].map((item) => (
-                    <div
-                      key={item.label}
-                      className="rounded-2xl border border-border bg-shell px-4 py-3"
-                    >
-                      <item.icon className="h-4 w-4 text-primary" />
-                      <p className="mt-3 text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
-                        {item.label}
-                      </p>
-                      <p className="mt-2 text-sm font-medium">{item.value}</p>
-                    </div>
-                  ))}
+                <div className="flex justify-center lg:min-w-[260px] lg:justify-end">
+                  <OrbAvatar
+                    active={isConnected}
+                    speaking={isConnected && speakerMode === "speaking"}
+                    className="h-24 w-24 sm:h-28 sm:w-28"
+                  />
                 </div>
               </div>
 
