@@ -1,5 +1,6 @@
 import { buildDisplayTranscript, buildRawTranscript } from "@/lib/transcript/formatting";
 import type {
+  CustomPracticeQuestionTiming,
   SessionAnalysisPayload,
   SessionQuestionPrompt,
   SessionTranscriptEntry,
@@ -51,6 +52,35 @@ function findPromptEntryIndex(
   });
 }
 
+function findQuestionTiming(
+  sessionPayload: SessionAnalysisPayload,
+  prompt: SessionQuestionPrompt,
+  questionIndex: number,
+) {
+  const timeline = sessionPayload.customPracticeTimeline;
+
+  if (!timeline) {
+    return null;
+  }
+
+  return (
+    timeline.questions.find((question) => question.questionId === prompt.id) ??
+    timeline.questions.find((question) => question.questionIndex === questionIndex) ??
+    null
+  );
+}
+
+function getQuestionWindow(
+  timing: CustomPracticeQuestionTiming | null,
+  fallbackStartTimestamp: number | null,
+  fallbackEndTimestamp: number | null,
+) {
+  return {
+    endTimestamp: timing?.answerEndTimestamp ?? fallbackEndTimestamp,
+    startTimestamp: timing?.answerStartTimestamp ?? fallbackStartTimestamp,
+  };
+}
+
 export function buildCustomPracticeQuestionReviewSeeds(
   sessionPayload: SessionAnalysisPayload,
 ): CustomPracticeQuestionReviewSeed[] {
@@ -65,6 +95,7 @@ export function buildCustomPracticeQuestionReviewSeeds(
   const firstUserTimestamp =
     transcript.find((entry) => entry.role === "user")?.timestamp ?? null;
   const fallbackTimestamp = transcript[0]?.timestamp ?? Date.now();
+  const recordingStartedAt = sessionPayload.customPracticeTimeline?.recordingStartedAt ?? null;
 
   return prompts.map((prompt, questionIndex) => {
     const startIndex = findPromptEntryIndex(transcript, prompt, questionIndex);
@@ -78,8 +109,15 @@ export function buildCustomPracticeQuestionReviewSeeds(
         : [createPromptEntry(prompt, fallbackTimestamp + questionIndex)];
     const userEntries = segmentEntries.filter((entry) => entry.role === "user");
     const answerText = userEntries.map((entry) => entry.text.trim()).filter(Boolean).join(" ");
-    const answerStartTimestamp = userEntries[0]?.timestamp ?? null;
-    const answerEndTimestamp = userEntries[userEntries.length - 1]?.timestamp ?? null;
+    const fallbackAnswerStartTimestamp = userEntries[0]?.timestamp ?? null;
+    const fallbackAnswerEndTimestamp = userEntries[userEntries.length - 1]?.timestamp ?? null;
+    const questionTiming = findQuestionTiming(sessionPayload, prompt, questionIndex);
+    const { endTimestamp: answerEndTimestamp, startTimestamp: answerStartTimestamp } =
+      getQuestionWindow(
+        questionTiming,
+        fallbackAnswerStartTimestamp,
+        fallbackAnswerEndTimestamp,
+      );
     const estimatedDurationSeconds =
       answerStartTimestamp !== null &&
       answerEndTimestamp !== null &&
@@ -101,7 +139,7 @@ export function buildCustomPracticeQuestionReviewSeeds(
       },
       prompt,
       questionIndex,
-      sessionStartTimestamp: firstUserTimestamp,
+      sessionStartTimestamp: recordingStartedAt ?? firstUserTimestamp,
       windowEndTimestamp: answerEndTimestamp,
       windowStartTimestamp: answerStartTimestamp,
     } satisfies CustomPracticeQuestionReviewSeed;

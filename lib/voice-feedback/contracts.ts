@@ -1,6 +1,11 @@
 import type { PresenceSessionResult } from "../../src/types/presence";
 
-export type FeedbackSource = "deterministic" | "groq" | "mock";
+export type FeedbackSource =
+  | "deterministic"
+  | "featherless"
+  | "groq"
+  | "llm"
+  | "mock";
 export type CustomPracticeIntensity =
   | "clarity"
   | "exploratory"
@@ -31,6 +36,18 @@ export type CustomPracticeSettings = {
   prepTime: number;
   questionCount: number;
   topic: string;
+};
+
+export type CustomPracticeQuestionTiming = {
+  answerEndTimestamp: number | null;
+  answerStartTimestamp: number | null;
+  questionId: string;
+  questionIndex: number;
+};
+
+export type CustomPracticeTimeline = {
+  questions: CustomPracticeQuestionTiming[];
+  recordingStartedAt: number | null;
 };
 
 export type DebateRoundPlan = {
@@ -151,6 +168,7 @@ export type DebateResult = {
 export type SessionAnalysisPayload = {
   cameraRecording?: SessionCameraRecording | null;
   customPracticeSettings?: CustomPracticeSettings | null;
+  customPracticeTimeline?: CustomPracticeTimeline | null;
   debateResult?: DebateResult | null;
   debateSettings?: DebateSettings | null;
   displayTranscript?: string | null;
@@ -184,12 +202,12 @@ export type FeedbackSummary = {
 
 export type FeedbackResponse = {
   feedback: FeedbackSummary;
-  mode: "groq" | "mock";
+  mode: "groq" | "llm" | "mock";
 };
 
 export type DebateJudgeResponse = {
   judge: DebateJudgeSummary;
-  mode: "groq" | "mock";
+  mode: "groq" | "llm" | "mock";
 };
 
 export type LiveMetricTone = "cyan" | "emerald" | "violet";

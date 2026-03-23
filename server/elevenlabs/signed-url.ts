@@ -93,7 +93,7 @@ export function createElevenLabsSignedUrlMiddleware(
 
     const requestedMode = getRequestedMode(req);
     const resolvedAgentId =
-      requestedMode === "debate" ? config.debateAgentId ?? config.agentId : config.agentId;
+      requestedMode === "debate" ? config.debateAgentId : config.agentId;
 
     if (!config.apiKey || !resolvedAgentId) {
       sendJson(res, 200, {

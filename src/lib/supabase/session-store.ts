@@ -99,6 +99,59 @@ function buildSessionVideoPath(
   return `${userId}/${sessionId}/webcam.${recording.mimeType.includes("mp4") ? "mp4" : "webm"}`;
 }
 
+async function listStoragePathsRecursively(
+  bucket: string,
+  prefix: string,
+): Promise<string[]> {
+  const services = getSupabaseServices();
+
+  if (!services) {
+    return [] satisfies string[];
+  }
+
+  const discoveredPaths = new Set<string>();
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await services.client.storage.from(bucket).list(prefix, {
+      limit: 100,
+      offset,
+      sortBy: { column: "name", order: "asc" },
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data || data.length === 0) {
+      break;
+    }
+
+    for (const entry of data) {
+      const entryPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+
+      if (entry.id === null) {
+        const nestedPaths = await listStoragePathsRecursively(bucket, entryPath);
+
+        nestedPaths.forEach((path) => {
+          discoveredPaths.add(path);
+        });
+        continue;
+      }
+
+      discoveredPaths.add(entryPath);
+    }
+
+    if (data.length < 100) {
+      break;
+    }
+
+    offset += data.length;
+  }
+
+  return Array.from(discoveredPaths);
+}
+
 async function uploadRecordingAsset(
   userId: string,
   sessionId: string,
@@ -365,4 +418,87 @@ export async function loadSessionHistoryFromSupabase() {
   }
 
   return data.map((row) => toHistoryEntry(row as SupabaseSessionRow));
+}
+
+export async function deleteSessionHistoryFromSupabase() {
+  const services = getSupabaseServices();
+
+  if (!services) {
+    return 0;
+  }
+
+  const {
+    data: { user },
+  } = await services.client.auth.getUser();
+
+  if (!user) {
+    return 0;
+  }
+
+  const { data, error } = await services.client
+    .from("sessions")
+    .select("id, video_assets")
+    .eq("user_id", user.id);
+
+  if (error) {
+    throw error;
+  }
+
+  const assetsByBucket = new Map<string, Set<string>>();
+
+  (data ?? []).forEach((row) => {
+    const assets = parseSessionVideoAssets(
+      (row as { video_assets?: unknown }).video_assets,
+    );
+
+    assets.forEach((asset) => {
+      if (!assetsByBucket.has(asset.bucket)) {
+        assetsByBucket.set(asset.bucket, new Set<string>());
+      }
+
+      assetsByBucket.get(asset.bucket)?.add(asset.path);
+    });
+  });
+
+  const orphanedSessionRecordingPaths = await listStoragePathsRecursively(
+    SESSION_RECORDINGS_BUCKET,
+    user.id,
+  );
+
+  if (orphanedSessionRecordingPaths.length > 0) {
+    if (!assetsByBucket.has(SESSION_RECORDINGS_BUCKET)) {
+      assetsByBucket.set(SESSION_RECORDINGS_BUCKET, new Set<string>());
+    }
+
+    orphanedSessionRecordingPaths.forEach((path) => {
+      assetsByBucket.get(SESSION_RECORDINGS_BUCKET)?.add(path);
+    });
+  }
+
+  for (const [bucket, paths] of assetsByBucket.entries()) {
+    const pathsToRemove = Array.from(paths);
+
+    if (pathsToRemove.length === 0) {
+      continue;
+    }
+
+    const { error: storageError } = await services.client.storage
+      .from(bucket)
+      .remove(pathsToRemove);
+
+    if (storageError) {
+      throw storageError;
+    }
+  }
+
+  const { error: deleteError } = await services.client
+    .from("sessions")
+    .delete()
+    .eq("user_id", user.id);
+
+  if (deleteError) {
+    throw deleteError;
+  }
+
+  return data?.length ?? 0;
 }

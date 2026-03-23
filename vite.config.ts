@@ -16,6 +16,7 @@ function parseCsvEnv(value?: string) {
 function voiceForgeElevenLabsApiPlugin(config: {
   agentId?: string;
   apiKey?: string;
+  debateAgentId?: string;
 }): Plugin {
   const middleware = createElevenLabsSignedUrlMiddleware(config);
 
@@ -31,8 +32,9 @@ function voiceForgeElevenLabsApiPlugin(config: {
 }
 
 function voiceForgeGroqApiPlugin(config: {
-  apiKey?: string;
-  apiKeys?: string[];
+  featherlessApiKey?: string;
+  groqApiKey?: string;
+  groqApiKeys?: string[];
 }): Plugin {
   const middleware = createGroqFeedbackMiddleware(config);
 
@@ -56,10 +58,12 @@ export default defineConfig(({ mode }) => {
       voiceForgeElevenLabsApiPlugin({
         agentId: env.ELEVENLABS_AGENT_ID,
         apiKey: env.ELEVENLABS_API_KEY,
+        debateAgentId: env.ELEVENLABS_DEBATE_AGENT_ID,
       }),
       voiceForgeGroqApiPlugin({
-        apiKey: env.GROQ_API_KEY,
-        apiKeys: parseCsvEnv(env.GROQ_API_KEYS),
+        featherlessApiKey: env.FEATHERLESS_API_KEY,
+        groqApiKey: env.GROQ_API_KEY,
+        groqApiKeys: parseCsvEnv(env.GROQ_API_KEYS),
       }),
     ],
     resolve: {

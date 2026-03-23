@@ -26,6 +26,7 @@ const SAMPLE_INTERVAL_MS = 450;
 const MODEL_LOAD_TIMEOUT_MS = 20000;
 const VIDEO_EVENT_TIMEOUT_MS = 12000;
 const VIDEO_FRAME_EPSILON_SECONDS = 0.05;
+const RENDERED_FRAME_FALLBACK_TIMEOUT_MS = 1000;
 
 type SpeakingWindow = {
   endMs: number;
@@ -339,7 +340,11 @@ function waitForVideoEvent(
 }
 
 function waitForRenderedFrame(video: HTMLVideoElement) {
-  if (typeof video.requestVideoFrameCallback === "function") {
+  if (
+    typeof video.requestVideoFrameCallback === "function" &&
+    video.isConnected &&
+    !video.paused
+  ) {
     return new Promise<void>((resolve, reject) => {
       const timeoutId = window.setTimeout(() => {
         cleanup();
@@ -366,8 +371,20 @@ function waitForRenderedFrame(video: HTMLVideoElement) {
     });
   }
 
-  return new Promise<void>((resolve) => {
-    window.requestAnimationFrame(() => resolve());
+  return new Promise<void>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out while waiting for the decoded video frame."));
+    }, RENDERED_FRAME_FALLBACK_TIMEOUT_MS);
+    const frameId = window.requestAnimationFrame(() => {
+      cleanup();
+      resolve();
+    });
+
+    const cleanup = () => {
+      window.clearTimeout(timeoutId);
+      window.cancelAnimationFrame(frameId);
+    };
   });
 }
 

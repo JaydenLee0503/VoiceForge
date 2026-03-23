@@ -188,8 +188,9 @@ async function startVoiceForgeServer() {
       debateAgentId: process.env.ELEVENLABS_DEBATE_AGENT_ID,
     }),
     createGroqFeedbackMiddleware({
-      apiKey: process.env.GROQ_API_KEY,
-      apiKeys: parseCsvEnv(process.env.GROQ_API_KEYS),
+      featherlessApiKey: process.env.FEATHERLESS_API_KEY,
+      groqApiKey: process.env.GROQ_API_KEY,
+      groqApiKeys: parseCsvEnv(process.env.GROQ_API_KEYS),
     }),
   ];
 

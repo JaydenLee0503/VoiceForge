@@ -2,7 +2,7 @@ import {
   ChevronLeft,
   LoaderCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { CameraPresencePanel } from "@/components/session/CameraPresencePanel";
@@ -24,8 +24,10 @@ import {
 } from "../../../lib/voice-feedback/analysis";
 import type {
   CustomPracticeSettings,
+  CustomPracticeTimeline,
   SessionAnalysisPayload,
   SessionCameraRecording,
+  SessionQuestionPrompt,
   SessionTranscriptEntry,
 } from "../../../lib/voice-feedback/contracts";
 import { saveSessionCameraRecording } from "../session/session-camera-storage";
@@ -91,6 +93,86 @@ function getPresenceFallback(
   return null;
 }
 
+function createCustomPracticeTimeline(
+  questions: SessionQuestionPrompt[],
+): CustomPracticeTimeline {
+  return {
+    questions: questions.map((question, questionIndex) => ({
+      answerEndTimestamp: null,
+      answerStartTimestamp: null,
+      questionId: question.id,
+      questionIndex,
+    })),
+    recordingStartedAt: null,
+  };
+}
+
+function markQuestionAnswerStarted(
+  timeline: CustomPracticeTimeline | null,
+  questionIndex: number,
+  startedAt: number,
+) {
+  if (!timeline) {
+    return null;
+  }
+
+  return {
+    ...timeline,
+    questions: timeline.questions.map((question) =>
+      question.questionIndex === questionIndex
+        ? {
+            ...question,
+            answerStartTimestamp: question.answerStartTimestamp ?? startedAt,
+          }
+        : question,
+    ),
+  } satisfies CustomPracticeTimeline;
+}
+
+function markQuestionAnswerEnded(
+  timeline: CustomPracticeTimeline | null,
+  questionIndex: number,
+  endedAt: number,
+) {
+  if (!timeline) {
+    return null;
+  }
+
+  return {
+    ...timeline,
+    questions: timeline.questions.map((question) =>
+      question.questionIndex === questionIndex
+        ? {
+            ...question,
+            answerEndTimestamp: question.answerEndTimestamp ?? endedAt,
+          }
+        : question,
+    ),
+  } satisfies CustomPracticeTimeline;
+}
+
+function markRecordingStarted(
+  timeline: CustomPracticeTimeline | null,
+  questionIndex: number,
+  startedAt: number,
+) {
+  if (!timeline || timeline.recordingStartedAt !== null) {
+    return timeline;
+  }
+
+  return {
+    recordingStartedAt: startedAt,
+    questions: timeline.questions.map((question) =>
+      question.questionIndex === questionIndex
+        ? {
+            ...question,
+            answerStartTimestamp: startedAt,
+          }
+        : question,
+    ),
+  } satisfies CustomPracticeTimeline;
+}
+
 export function CustomPracticeSessionPage() {
   const navigate = useNavigate();
   const [cameraEnabled, setCameraEnabled] = useState(true);
@@ -105,7 +187,10 @@ export function CustomPracticeSessionPage() {
   const [isCompleting, setIsCompleting] = useState(false);
   const [promptTurns, setPromptTurns] = useState<SessionTranscriptEntry[]>([]);
   const [captureStarted, setCaptureStarted] = useState(false);
+  const [customPracticeTimeline, setCustomPracticeTimeline] =
+    useState<CustomPracticeTimeline | null>(null);
   const [sessionId] = useState(() => `vf-cp-${Date.now().toString(36)}`);
+  const customPracticeTimelineRef = useRef<CustomPracticeTimeline | null>(null);
 
   const speechTranscript = useBrowserSpeechTranscript({
     enabled: true,
@@ -117,6 +202,37 @@ export function CustomPracticeSessionPage() {
     isSessionActive: captureStarted && !isCompleting,
     sessionId,
   });
+
+  function commitCustomPracticeTimeline(nextTimeline: CustomPracticeTimeline | null) {
+    customPracticeTimelineRef.current = nextTimeline;
+    setCustomPracticeTimeline(nextTimeline);
+    return nextTimeline;
+  }
+
+  function updateCustomPracticeTimeline(
+    transform: (current: CustomPracticeTimeline | null) => CustomPracticeTimeline | null,
+  ) {
+    return commitCustomPracticeTimeline(transform(customPracticeTimelineRef.current));
+  }
+
+  function beginAnswerStage(targetQuestionIndex: number) {
+    if (!config) {
+      return;
+    }
+
+    updateCustomPracticeTimeline((current) =>
+      markQuestionAnswerStarted(current, targetQuestionIndex, Date.now()),
+    );
+    setStage("answer");
+    setTimeLeft(config.answerTime);
+    setCaptureStarted(true);
+  }
+
+  function completeAnswerStage(targetQuestionIndex: number) {
+    updateCustomPracticeTimeline((current) =>
+      markQuestionAnswerEnded(current, targetQuestionIndex, Date.now()),
+    );
+  }
 
   useEffect(() => {
     const storedConfig = loadCustomPracticeSettings();
@@ -135,6 +251,7 @@ export function CustomPracticeSessionPage() {
       questionCount: storedConfig.questionCount,
       topic: storedConfig.topic,
     }).then((response) => {
+      commitCustomPracticeTimeline(createCustomPracticeTimeline(response.questions));
       setQuestionSet(response);
       setStage("prep");
       setTimeLeft(storedConfig.prepTime);
@@ -186,6 +303,7 @@ export function CustomPracticeSessionPage() {
     return {
       cameraRecording: null,
       customPracticeSettings: config,
+      customPracticeTimeline,
       displayTranscript: buildDisplayTranscript(transcript),
       durationSeconds: elapsedSeconds,
       generatedQuestions: questionSet.questions,
@@ -195,7 +313,7 @@ export function CustomPracticeSessionPage() {
       transcript,
       verbalMetrics: null,
     };
-  }, [config, elapsedSeconds, questionSet, scenario, transcript]);
+  }, [config, customPracticeTimeline, elapsedSeconds, questionSet, scenario, transcript]);
   const payload = useMemo(() => {
     if (!basePayload) {
       return null;
@@ -234,20 +352,34 @@ export function CustomPracticeSessionPage() {
   });
 
   useEffect(() => {
+    if (
+      stage !== "answer" ||
+      sessionCamera.status !== "recording" ||
+      customPracticeTimelineRef.current?.recordingStartedAt !== null
+    ) {
+      return;
+    }
+
+    updateCustomPracticeTimeline((current) =>
+      markRecordingStarted(current, questionIndex, Date.now()),
+    );
+  }, [questionIndex, sessionCamera.status, stage]);
+
+  useEffect(() => {
     if (!config || !questionSet || stage === "loading" || isCompleting) {
       return undefined;
     }
 
     if (timeLeft === 0) {
       if (stage === "prep") {
-        setStage("answer");
-        setTimeLeft(config.answerTime);
-        setCaptureStarted(true);
+        beginAnswerStage(questionIndex);
       } else if (questionIndex + 1 < questionSet.questions.length) {
+        completeAnswerStage(questionIndex);
         setQuestionIndex((value) => value + 1);
         setStage("prep");
         setTimeLeft(config.prepTime);
       } else {
+        completeAnswerStage(questionIndex);
         void finalizeSession(true);
       }
 
@@ -292,6 +424,7 @@ export function CustomPracticeSessionPage() {
     const finalPayloadBase: SessionAnalysisPayload = {
       ...payload,
       cameraRecording: recordingReference,
+      customPracticeTimeline: customPracticeTimelineRef.current,
       presence:
         presenceFallback ??
         getPresenceFallback(cameraEnabled, sessionCamera.status, recordingReference !== null),
@@ -446,9 +579,7 @@ export function CustomPracticeSessionPage() {
               {stage === "prep" ? (
                 <Button
                   onClick={() => {
-                    setStage("answer");
-                    setTimeLeft(config.answerTime);
-                    setCaptureStarted(true);
+                    beginAnswerStage(questionIndex);
                   }}
                 >
                   Start answer
@@ -456,6 +587,8 @@ export function CustomPracticeSessionPage() {
               ) : (
                 <Button
                   onClick={() => {
+                    completeAnswerStage(questionIndex);
+
                     if (questionIndex + 1 < questionSet.questions.length) {
                       setQuestionIndex((value) => value + 1);
                       setStage("prep");
@@ -473,6 +606,10 @@ export function CustomPracticeSessionPage() {
 
               <Button
                 onClick={() => {
+                  if (stage === "answer") {
+                    completeAnswerStage(questionIndex);
+                  }
+
                   void finalizeSession(true);
                 }}
                 variant="secondary"
