@@ -9,10 +9,12 @@ type CameraPresencePanelProps = Pick<
   "status" | "statusMessage" | "videoRef"
 > & {
   cameraEnabled: boolean;
+  showDetails?: boolean;
 };
 
 export function CameraPresencePanel({
   cameraEnabled,
+  showDetails = true,
   status,
   statusMessage,
   videoRef,
@@ -81,34 +83,36 @@ export function CameraPresencePanel({
         )}
       </div>
 
-      <div className="border-t border-border px-6 py-5">
-        <div className="grid gap-3 sm:grid-cols-2">
-          {[
-            {
-              label: "Capture timing",
-              value: "Recorded during the live session, analyzed after it ends.",
-            },
-            {
-              label: "Scoring flow",
-              value: "MediaPipe runs on the saved session video instead of the live feed.",
-            },
-          ].map((item) => (
-            <div
-              key={item.label}
-              className="rounded-2xl border border-border bg-shell px-4 py-4"
-            >
-              <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
-                {item.label}
-              </p>
-              <p className="mt-2 text-sm text-foreground">{item.value}</p>
-            </div>
-          ))}
-        </div>
+      {showDetails ? (
+        <div className="border-t border-border px-6 py-5">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[
+              {
+                label: "Capture timing",
+                value: "Recorded during the live session, analyzed after it ends.",
+              },
+              {
+                label: "Scoring flow",
+                value: "MediaPipe runs on the saved session video instead of the live feed.",
+              },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className="rounded-2xl border border-border bg-shell px-4 py-4"
+              >
+                <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
+                  {item.label}
+                </p>
+                <p className="mt-2 text-sm text-foreground">{item.value}</p>
+              </div>
+            ))}
+          </div>
 
-        <div className="mt-4 rounded-2xl border border-border bg-shell px-4 py-4">
-          <p className="text-sm text-muted-foreground">{statusMessage}</p>
+          <div className="mt-4 rounded-2xl border border-border bg-shell px-4 py-4">
+            <p className="text-sm text-muted-foreground">{statusMessage}</p>
+          </div>
         </div>
-      </div>
+      ) : null}
     </Panel>
   );
 }

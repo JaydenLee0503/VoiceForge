@@ -22,12 +22,15 @@ import { Button } from "@/shared/ui/button";
 import { Panel } from "@/shared/ui/panel";
 import { ProgressBar } from "@/shared/ui/progress-bar";
 import type { PresenceSessionResult } from "@/types/presence";
+import { buildDeterministicDebateResult } from "../../../lib/debate/analysis";
 import { buildDeterministicFeedbackSummary } from "../../../lib/voice-feedback/analysis";
 import type {
+  DebateResult,
   FeedbackSummary,
   SessionAnalysisPayload,
 } from "../../../lib/voice-feedback/contracts";
-
+import { requestDebateJudgment } from "../debate/judge-client";
+import { DebateResultsView } from "../debate/results-view";
 import { requestSessionFeedback } from "./feedback-client";
 import {
   loadSessionCameraRecording,
@@ -199,6 +202,9 @@ export function ResultsPage() {
   const isCustomPractice =
     activeSnapshot?.payload.customPracticeSettings !== null &&
     activeSnapshot?.payload.customPracticeSettings !== undefined;
+  const isDebateSession =
+    activeSnapshot?.payload.mode === "debate" ||
+    Boolean(activeSnapshot?.payload.debateSettings);
   const activeScenario = useMemo(
     () =>
       scenarios.find((scenario) => scenario.id === activeSnapshot?.payload.scenario.id) ??
@@ -208,6 +214,9 @@ export function ResultsPage() {
   const [resolvedSnapshot, setResolvedSnapshot] = useState(activeSnapshot);
   const [feedbackStatus, setFeedbackStatus] = useState<"idle" | "loading" | "ready">(
     remoteHistoryEntry ? "ready" : "idle",
+  );
+  const [debateStatus, setDebateStatus] = useState<"idle" | "loading" | "ready">(
+    remoteHistoryEntry?.payload.debateResult ? "ready" : "idle",
   );
   const [syncedSessionId, setSyncedSessionId] = useState<string | null>(null);
   const [presenceAnalysisStatus, setPresenceAnalysisStatus] = useState<
@@ -227,6 +236,9 @@ export function ResultsPage() {
   useEffect(() => {
     setResolvedSnapshot(activeSnapshot);
     setFeedbackStatus(remoteHistoryEntry ? "ready" : "idle");
+    setDebateStatus(
+      activeSnapshot?.payload.debateResult || !isDebateSession ? "ready" : "idle",
+    );
     setPresenceAnalysisStatus(
       activeSnapshot?.payload.presence || !activeSnapshot?.payload.cameraRecording
         ? "complete"
@@ -234,7 +246,7 @@ export function ResultsPage() {
           ? "idle"
           : "complete",
     );
-  }, [activeSnapshot, remoteHistoryEntry]);
+  }, [activeSnapshot, isDebateSession, remoteHistoryEntry]);
 
   useEffect(() => {
     const recording = resolvedSnapshot?.payload.cameraRecording;
@@ -300,6 +312,8 @@ export function ResultsPage() {
       setRemoteHistoryEntry(entry);
       setFeedback(entry.feedback);
       setFeedbackStatus("ready");
+      setDebateResult(entry.payload.debateResult ?? null);
+      setDebateStatus(entry.payload.debateResult ? "ready" : "idle");
       setSyncedSessionId(null);
       upsertSessionHistoryEntry(entry);
       saveLastSessionSnapshot({
@@ -321,6 +335,13 @@ export function ResultsPage() {
   const deterministicFeedback = useMemo(
     () => buildDeterministicFeedbackSummary(sessionPayload),
     [sessionPayload],
+  );
+  const deterministicDebateResult = useMemo(
+    () =>
+      isDebateSession && sessionPayload.debateSettings
+        ? buildDeterministicDebateResult(sessionPayload)
+        : null,
+    [isDebateSession, sessionPayload],
   );
   const presenceResult = sessionPayload.presence ?? null;
   const customPracticeQuestionSeeds = useMemo(
@@ -344,6 +365,9 @@ export function ResultsPage() {
   );
   const [feedback, setFeedback] = useState(
     remoteHistoryEntry?.feedback ?? deterministicFeedback,
+  );
+  const [debateResult, setDebateResult] = useState<DebateResult | null>(
+    remoteHistoryEntry?.payload.debateResult ?? deterministicDebateResult,
   );
   const [questionReviewStatus, setQuestionReviewStatus] = useState<
     "idle" | "loading" | "ready"
@@ -375,6 +399,10 @@ export function ResultsPage() {
   useEffect(() => {
     setFeedback(remoteHistoryEntry?.feedback ?? deterministicFeedback);
   }, [deterministicFeedback, remoteHistoryEntry]);
+
+  useEffect(() => {
+    setDebateResult(remoteHistoryEntry?.payload.debateResult ?? deterministicDebateResult);
+  }, [deterministicDebateResult, remoteHistoryEntry]);
 
   const hasSessionRecording = Boolean(resolvedSnapshot?.payload.cameraRecording);
 
@@ -494,6 +522,40 @@ export function ResultsPage() {
     );
   }, [presenceAnalysisStatus, remoteHistoryEntry, resolvedSnapshot]);
 
+  const shouldRefreshDebate = useMemo(() => {
+    if (!resolvedSnapshot || !isDebateSession || !resolvedSnapshot.payload.debateSettings) {
+      return false;
+    }
+
+    if (debateStatus === "loading") {
+      return false;
+    }
+
+    const isAwaitingPresenceAnalysis =
+      Boolean(resolvedSnapshot.payload.cameraRecording) &&
+      !resolvedSnapshot.payload.presence &&
+      presenceAnalysisStatus !== "complete";
+
+    if (isAwaitingPresenceAnalysis || presenceAnalysisStatus === "analyzing") {
+      return false;
+    }
+
+    if (!remoteHistoryEntry?.payload.debateResult) {
+      return true;
+    }
+
+    return !hasMatchingPresence(
+      remoteHistoryEntry.payload.presence,
+      resolvedSnapshot.payload.presence,
+    );
+  }, [
+    debateStatus,
+    isDebateSession,
+    presenceAnalysisStatus,
+    remoteHistoryEntry,
+    resolvedSnapshot,
+  ]);
+
   useEffect(() => {
     if (!resolvedSnapshot || !shouldRefreshFeedback) {
       return undefined;
@@ -519,6 +581,63 @@ export function ResultsPage() {
       cancelled = true;
     };
   }, [resolvedSnapshot, shouldRefreshFeedback]);
+
+  useEffect(() => {
+    if (
+      !resolvedSnapshot ||
+      !resolvedSnapshot.payload.debateSettings ||
+      !shouldRefreshDebate ||
+      !deterministicDebateResult
+    ) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    setDebateStatus("loading");
+
+    const seededSnapshot = {
+      ...resolvedSnapshot,
+      payload: {
+        ...resolvedSnapshot.payload,
+        debateResult: deterministicDebateResult,
+      },
+    };
+
+    setResolvedSnapshot(seededSnapshot);
+    saveLastSessionSnapshot(seededSnapshot);
+
+    void requestDebateJudgment(seededSnapshot.payload).then((summary) => {
+      if (cancelled) {
+        return;
+      }
+
+      setDebateResult(summary);
+      setDebateStatus("ready");
+      const nextSnapshot = {
+        ...seededSnapshot,
+        payload: {
+          ...seededSnapshot.payload,
+          debateResult: summary,
+        },
+      };
+
+      setResolvedSnapshot(nextSnapshot);
+      saveLastSessionSnapshot(nextSnapshot);
+      setSyncedSessionId(null);
+      const nextEntry = buildSessionHistoryEntry(nextSnapshot, feedback);
+      setRemoteHistoryEntry(nextEntry);
+      upsertSessionHistoryEntry(nextEntry);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    deterministicDebateResult,
+    feedback,
+    resolvedSnapshot,
+    shouldRefreshDebate,
+  ]);
 
   useEffect(() => {
     if (
@@ -600,6 +719,7 @@ export function ResultsPage() {
       !resolvedSnapshot ||
       presenceAnalysisStatus !== "complete" ||
       feedbackStatus !== "ready" ||
+      (isDebateSession && debateStatus !== "ready") ||
       syncedSessionId === resolvedSnapshot.id
     ) {
       return undefined;
@@ -650,7 +770,33 @@ export function ResultsPage() {
     return () => {
       cancelled = true;
     };
-  }, [feedback, feedbackStatus, presenceAnalysisStatus, resolvedSnapshot, syncedSessionId]);
+  }, [
+    debateStatus,
+    feedback,
+    feedbackStatus,
+    isDebateSession,
+    presenceAnalysisStatus,
+    resolvedSnapshot,
+    syncedSessionId,
+  ]);
+
+  if (isDebateSession && sessionPayload.debateSettings && debateResult) {
+    return (
+      <AppShell>
+        <DebateResultsView
+          analysisRecordingStatus={analysisRecordingStatus}
+          analysisRecordingUrl={analysisRecordingUrl}
+          debateResult={debateResult}
+          feedback={feedback}
+          feedbackStatus={feedbackStatus}
+          hasSessionRecording={hasSessionRecording}
+          presenceAnalysisStatus={presenceAnalysisStatus}
+          presenceResult={presenceResult}
+          settings={sessionPayload.debateSettings}
+        />
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell>

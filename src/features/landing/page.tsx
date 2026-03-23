@@ -53,11 +53,14 @@ export function LandingPage() {
                 Start practicing
                 <ArrowRight className="h-4 w-4" />
               </Button>
+              <Button className="min-w-44" size="lg" to="/debate" variant="secondary">
+                Enter debate mode
+              </Button>
               <Button
                 className="min-w-44"
                 onClick={scrollToDemoSection}
                 size="lg"
-                variant="secondary"
+                variant="ghost"
               >
                 <Play className="h-4 w-4" />
                 See demo
@@ -110,6 +113,22 @@ export function LandingPage() {
                     <SignalCard label="Pace" value="Stable" />
                   </div>
                 </div>
+
+                <Link
+                  className="rounded-3xl border border-primary/25 bg-primary/10 p-5 transition hover:border-primary/40"
+                  to="/debate"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm text-primary">Debate Mode</p>
+                      <p className="mt-2 text-xl font-semibold">AI Debate Arena</p>
+                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                        Structured rounds, stance control, and a hybrid verdict layer for replayable pressure drills.
+                      </p>
+                    </div>
+                    <Radar className="mt-1 h-5 w-5 text-primary" />
+                  </div>
+                </Link>
 
                 <div className="grid gap-3">
                   {scenarios.slice(0, 3).map((scenario) => (

@@ -1,9 +1,8 @@
 import type { DisconnectionDetails, Mode, Status } from "@elevenlabs/client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { Scenario } from "@/shared/data/mock";
-
 import {
+  type LiveSessionConfig,
   type LiveSessionController,
   type LiveSessionTransport,
   type LiveTranscriptEntry,
@@ -83,8 +82,25 @@ export function useLiveSession() {
     void applyMuted(!mutedRef.current);
   }, [applyMuted]);
 
+  const sendContextualUpdate = useCallback(async (context: string) => {
+    if (!controllerRef.current) {
+      return;
+    }
+
+    try {
+      await controllerRef.current.sendContextualUpdate(context);
+    } catch (nextError) {
+      const message =
+        nextError instanceof Error
+          ? nextError.message
+          : "Failed to update the live session context.";
+
+      setError(message);
+    }
+  }, []);
+
   const startSession = useCallback(
-    async (scenario: Scenario) => {
+    async (session: LiveSessionConfig) => {
       if (
         sessionStatus === "connecting" ||
         sessionStatus === "connected" ||
@@ -173,7 +189,7 @@ export function useLiveSession() {
             },
           },
           muted: mutedRef.current,
-          scenario,
+          session,
         });
 
         if (sessionRunRef.current !== runId) {
@@ -253,6 +269,7 @@ export function useLiveSession() {
     mode,
     muted,
     notice,
+    sendContextualUpdate,
     sessionStatus,
     speakerMode,
     startSession,

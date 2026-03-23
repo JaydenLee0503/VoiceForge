@@ -1,4 +1,4 @@
-import { ArrowRight, Play } from "lucide-react";
+import { ArrowRight, Play, Swords } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -31,16 +31,6 @@ function getAverage(values: number[]) {
   return Math.round(values.reduce((total, value) => total + value, 0) / values.length);
 }
 
-function startOfDay(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-function getDayDifference(later: Date, earlier: Date) {
-  return Math.round(
-    (startOfDay(later).getTime() - startOfDay(earlier).getTime()) / 86_400_000,
-  );
-}
-
 function sortSessionHistory(entries: StoredSessionHistoryEntry[]) {
   return [...entries].sort(
     (left, right) =>
@@ -65,34 +55,6 @@ function mergeSessionHistory(
   });
 
   return sortSessionHistory(nextEntries);
-}
-
-function getSessionStreak(entries: StoredSessionHistoryEntry[]) {
-  const practiceDays = Array.from(
-    new Set(entries.map((entry) => startOfDay(new Date(entry.completedAt)).getTime())),
-  )
-    .sort((left, right) => right - left)
-    .map((timestamp) => new Date(timestamp));
-
-  if (practiceDays.length === 0) {
-    return 0;
-  }
-
-  if (getDayDifference(new Date(), practiceDays[0]) > 1) {
-    return 0;
-  }
-
-  let streak = 1;
-
-  for (let index = 1; index < practiceDays.length; index += 1) {
-    if (getDayDifference(practiceDays[index - 1], practiceDays[index]) !== 1) {
-      break;
-    }
-
-    streak += 1;
-  }
-
-  return streak;
 }
 
 function getPrimaryFocus(entries: StoredSessionHistoryEntry[]): FocusCard {
@@ -223,7 +185,6 @@ export function DashboardPage() {
   );
   const latestSession = sessionHistory[0] ?? null;
   const latestSessionListItem = latestSession ? toSessionHistoryListItem(latestSession) : null;
-  const streak = useMemo(() => getSessionStreak(sessionHistory), [sessionHistory]);
   const confidenceAverage = useMemo(
     () => getAverage(sessionHistory.map((entry) => entry.feedback.scores.confidence)),
     [sessionHistory],
@@ -244,11 +205,6 @@ export function DashboardPage() {
         value: String(sessionHistory.length),
       },
       {
-        detail: streak === 0 ? "start a new streak" : "current cadence",
-        label: "Streak",
-        value: `${streak} day${streak === 1 ? "" : "s"}`,
-      },
-      {
         detail: confidenceAverage === null ? "complete a session to unlock" : "rolling average",
         label: "Confidence",
         value: formatPercent(confidenceAverage),
@@ -259,7 +215,7 @@ export function DashboardPage() {
         value: formatPercent(clarityAverage),
       },
     ],
-    [clarityAverage, confidenceAverage, sessionHistory.length, streak],
+    [clarityAverage, confidenceAverage, sessionHistory.length],
   );
   const recentHistoryItems = historyItems.slice(0, 3);
 
@@ -275,14 +231,20 @@ export function DashboardPage() {
           eyebrow="Dashboard"
           title="Welcome back"
           actions={
-            <Button size="lg" to="/scenarios">
-              <Play className="h-4 w-4" />
-              Start session
-            </Button>
+            <>
+              <Button size="lg" to="/scenarios">
+                <Play className="h-4 w-4" />
+                Start session
+              </Button>
+              <Button size="lg" to="/debate" variant="ghost">
+                <Swords className="h-4 w-4" />
+                Debate mode
+              </Button>
+            </>
           }
         />
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-3">
           {summaryCards.map((stat) => (
             <Panel key={stat.label} className="p-5" elevated>
               <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">
@@ -297,60 +259,53 @@ export function DashboardPage() {
         <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
           <div className="space-y-6">
             <Panel className="p-6" elevated>
-              <div className="flex items-start justify-between gap-6">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div className="space-y-2">
                   <p className="text-xs font-semibold uppercase tracking-[0.28em] text-primary">
-                    {latestSession ? "Latest session" : "Start practicing"}
+                    {latestSession ? "Continue practice" : "Start practicing"}
                   </p>
-                  <h2 className="text-2xl font-semibold">
-                    {latestSession ? latestSession.payload.scenario.title : "Choose your first scenario"}
+                  <h2 className="text-xl font-semibold">
+                    {latestSession
+                      ? latestSession.payload.scenario.title
+                      : "Choose your first scenario"}
                   </h2>
                   <p className="max-w-xl text-sm leading-6 text-muted-foreground">
                     {latestSession
-                      ? `Last completed ${formatSessionDate(latestSession.completedAt)}. Re-run the same scenario or branch into a different speaking lane.`
-                      : "This dashboard stays empty until you generate real practice data. Start a session and VoiceForge will populate it from actual results."}
+                      ? `${latestSessionListItem?.date} | Confidence ${latestSessionListItem?.confidence}% | Clarity ${latestSessionListItem?.clarity}%`
+                      : "Start a session and VoiceForge will populate this space with your latest result."}
                   </p>
                 </div>
-                <Button
-                  to={latestSession ? `/session/${latestSession.payload.scenario.id}` : "/scenarios"}
-                  variant="secondary"
-                >
-                  {latestSession ? "Retry session" : "Choose scenario"}
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              </div>
-              {latestSessionListItem && (
-                <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-2xl border border-border bg-shell px-4 py-3">
-                    <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
-                      Date
-                    </p>
-                    <p className="mt-2 text-base font-semibold">{latestSessionListItem.date}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-shell px-4 py-3">
-                    <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
-                      Confidence
-                    </p>
-                    <p className="mt-2 text-base font-semibold">
-                      {latestSessionListItem.confidence}%
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-border bg-shell px-4 py-3">
-                    <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
-                      Clarity
-                    </p>
-                    <p className="mt-2 text-base font-semibold">{latestSessionListItem.clarity}%</p>
-                  </div>
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    to={latestSession ? `/session/${latestSession.payload.scenario.id}` : "/scenarios"}
+                    variant="secondary"
+                  >
+                    {latestSession ? "Retry session" : "Choose scenario"}
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                  {latestSession && (
+                    <Button to={`/results?session=${latestSession.id}`} variant="ghost">
+                      View results
+                    </Button>
+                  )}
                 </div>
-              )}
+              </div>
             </Panel>
 
             <Panel className="p-6" elevated>
-              <h3 className="text-xl font-semibold">Scenario shortcuts</h3>
-              <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
-                Jump straight back into a high-value rep without digging through the
-                picker.
-              </p>
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h3 className="text-xl font-semibold">Scenario shortcuts</h3>
+                  <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+                    Jump straight back into a high-value rep without digging through the
+                    picker.
+                  </p>
+                </div>
+                <Button to="/debate" variant="ghost">
+                  Debate mode
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              </div>
               <div className="mt-5 grid gap-3">
                 {scenarios.slice(0, 3).map((scenario) => (
                   <Button

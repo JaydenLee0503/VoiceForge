@@ -3,7 +3,7 @@ create extension if not exists pgcrypto;
 create table if not exists public.sessions (
   id text primary key,
   user_id uuid not null references auth.users (id) on delete cascade,
-  session_type text not null check (session_type in ('scenario', 'custom_practice')),
+  session_type text not null check (session_type in ('scenario', 'custom_practice', 'debate')),
   scenario_id text not null,
   scenario_title text not null,
   scenario_focus text not null,

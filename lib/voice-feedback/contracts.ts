@@ -5,6 +5,16 @@ export type CustomPracticeIntensity =
   | "clarity"
   | "exploratory"
   | "pressure-test";
+export type SessionMode = "custom_practice" | "debate" | "scenario";
+export type SessionTranscriptRole = "coach" | "opponent" | "user";
+export type DebateStance = "affirm" | "oppose";
+export type DebateDifficulty = "apex" | "challenger" | "foundation";
+export type DebateRoundFormat = "balanced" | "rapid-fire" | "rebuttal-heavy";
+export type DebateAudienceStyle = "boardroom" | "campus-forum" | "public-square";
+export type DebateJudgeStyle = "analytical" | "balanced" | "skeptical";
+export type DebateRoundType = "closing" | "opening" | "rebuttal";
+export type DebateOutcome = "draw" | "lose" | "win";
+export type DebateJudgeWinner = "draw" | "opponent" | "user";
 
 export type SessionAnalysisScenario = {
   description: string;
@@ -23,9 +33,33 @@ export type CustomPracticeSettings = {
   topic: string;
 };
 
+export type DebateRoundPlan = {
+  id: string;
+  label: string;
+  order: number;
+  prompt: string;
+  seconds: number;
+  type: DebateRoundType;
+};
+
+export type DebateSettings = {
+  assignedStance: boolean;
+  audienceStyle: DebateAudienceStyle;
+  difficulty: DebateDifficulty;
+  judgeStyle: DebateJudgeStyle;
+  lengthMinutes: 1 | 2 | 3 | 4;
+  opponentStance: DebateStance;
+  prepSeconds: number;
+  roundFormat: DebateRoundFormat;
+  roundPlan: DebateRoundPlan[];
+  topic: string;
+  topicId: string | null;
+  userStance: DebateStance;
+};
+
 export type SessionTranscriptEntry = {
   id: string;
-  role: "coach" | "user";
+  role: SessionTranscriptRole;
   text: string;
   timestamp: number;
 };
@@ -64,12 +98,65 @@ export type VerbalMetricsSummary = {
   wordsPerMinute: number;
 };
 
+export type DebateCategoryScores = {
+  argumentStrength: number;
+  clarity: number;
+  confidence: number;
+  pace: number;
+  persuasiveness: number;
+  presence: number;
+  rebuttalQuality: number;
+  structure: number;
+};
+
+export type DebateRoundScore = {
+  label: string;
+  outcome: DebateOutcome;
+  roundId: string;
+  score: number;
+  summary: string;
+};
+
+export type DebateRewards = {
+  badge: string | null;
+  points: number;
+  streakBonus: number;
+};
+
+export type DebateJudgeSummary = {
+  finalVerdict: string;
+  model: string | null;
+  rebuttalQuality: string;
+  source: FeedbackSource;
+  strongestArgument: string;
+  suggestedImprovement: string;
+  weakestArgument: string;
+  winner: DebateJudgeWinner;
+};
+
+export type DebateResult = {
+  bestMove: string;
+  biggestWeakness: string;
+  categoryScores: DebateCategoryScores;
+  finalVerdict: string;
+  judgeSummary: DebateJudgeSummary;
+  nextRoundFocus: string;
+  outcome: DebateOutcome;
+  rewards: DebateRewards;
+  roundScores: DebateRoundScore[];
+  totalScore: number;
+  updatedAt: number;
+};
+
 export type SessionAnalysisPayload = {
   cameraRecording?: SessionCameraRecording | null;
   customPracticeSettings?: CustomPracticeSettings | null;
+  debateResult?: DebateResult | null;
+  debateSettings?: DebateSettings | null;
   displayTranscript?: string | null;
   durationSeconds: number;
   generatedQuestions?: SessionQuestionPrompt[] | null;
+  mode?: SessionMode | null;
   presence?: PresenceSessionResult | null;
   rawTranscript?: string | null;
   scenario: SessionAnalysisScenario;
@@ -97,6 +184,11 @@ export type FeedbackSummary = {
 
 export type FeedbackResponse = {
   feedback: FeedbackSummary;
+  mode: "groq" | "mock";
+};
+
+export type DebateJudgeResponse = {
+  judge: DebateJudgeSummary;
   mode: "groq" | "mock";
 };
 
